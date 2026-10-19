@@ -1,0 +1,167 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DEFAULT_SETTINGS } from '../src/domain.js';
+import { createStore } from '../src/store.js';
+import { createTracker } from '../src/tracker.js';
+import { normalizeVideo, uploadsPlaylistId } from '../src/youtube.js';
+
+const CHANNEL = 'UCexampleChannelId1234567';
+
+function makeVideo(overrides = {}) {
+  return {
+    id: 'live0000001',
+    channelId: CHANNEL,
+    title: 'Sunnuntain jumalanpalvelus',
+    publishedAt: '2026-10-18T10:00:00Z',
+    liveBroadcastContent: 'live',
+    scheduledStartTime: '2026-10-18T10:00:00Z',
+    actualStartTime: '2026-10-18T10:01:00Z',
+    actualEndTime: null,
+    concurrentViewers: 40,
+    viewCount: 0,
+    ...overrides,
+  };
+}
+
+// Serves a mutable list of videos, like the YouTube API would.
+function fakeYouTube(videos) {
+  return {
+    videos,
+    async getChannelUploads() {
+      return [...videos.values()];
+    },
+    async getVideos(ids) {
+      return ids.map((id) => videos.get(id)).filter(Boolean);
+    },
+  };
+}
+
+async function setup({ videos = new Map(), start = '2026-10-18T10:00:00Z' } = {}) {
+  let clock = new Date(start);
+  const sent = [];
+  const logs = [];
+  const store = await createStore({
+    defaults: {
+      ...DEFAULT_SETTINGS,
+      reportRecipient: 'tilasto@example.com',
+      senderEmail: 'lahettaja@example.com',
+    },
+  });
+  const tracker = createTracker({
+    config: { youtubeChannelIds: [CHANNEL], publicBaseUrl: 'https://striimi.example.fi' },
+    store,
+    youtube: fakeYouTube(videos),
+    mailer: { async send(message) { sent.push(message); } },
+    now: () => clock,
+    log: { error: (message) => logs.push(message) },
+  });
+  return {
+    tracker,
+    store,
+    sent,
+    logs,
+    setTime(iso) {
+      clock = new Date(iso);
+    },
+  };
+}
+
+test('uploadsPlaylistId maps a channel id to its uploads playlist', () => {
+  assert.equal(uploadsPlaylistId(CHANNEL), 'UUexampleChannelId1234567');
+  assert.throws(() => uploadsPlaylistId('not-a-channel'));
+});
+
+test('normalizeVideo converts API strings to numbers and defaults', () => {
+  const out = normalizeVideo({
+    id: 'x',
+    snippet: { channelId: CHANNEL, title: 'T', liveBroadcastContent: 'live' },
+    liveStreamingDetails: { concurrentViewers: '17', actualStartTime: '2026-10-18T10:00:00Z' },
+    statistics: { viewCount: '99' },
+  });
+  assert.equal(out.concurrentViewers, 17);
+  assert.equal(out.viewCount, 99);
+  assert.equal(out.actualEndTime, null);
+  assert.equal(normalizeVideo({ id: 'y', snippet: { channelId: CHANNEL, title: 'U' } }).liveBroadcastContent, 'none');
+});
+
+test('a live stream is discovered once and sampled on every tick', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const app = await setup({ videos });
+
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ concurrentViewers: 55 }));
+  app.setTime('2026-10-18T10:01:00Z');
+  await app.tracker.tick();
+
+  const event = app.store.getEvent('live0000001');
+  assert.equal(event.source, 'youtube');
+  assert.equal(event.countingScheme, 'max_concurrent');
+  assert.deepEqual(event.samples.map((s) => s.viewers), [40, 55]);
+  assert.equal(app.store.listEvents().length, 1);
+});
+
+test('when a stream ends its end time is recorded and the report is sent once, after the delay', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const app = await setup({ videos });
+  await app.tracker.tick();
+
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null, viewCount: 300 }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+  assert.equal(app.store.getEvent('live0000001').endsAt, '2026-10-18T11:00:00Z');
+  assert.equal(app.sent.length, 0, 'not before the reporting delay has passed');
+
+  // Other events are reported after a day, so jump past the reporting time.
+  app.setTime('2026-10-19T12:00:01Z');
+  await app.tracker.tick();
+  await app.tracker.tick();
+
+  assert.equal(app.sent.length, 1);
+  assert.equal(app.sent[0].to, 'tilasto@example.com');
+  assert.match(app.sent[0].text, /Samanaikaisia katsojia \(enimmäismäärä\): 40/);
+  assert.ok(app.store.getEvent('live0000001').reportSentAt);
+});
+
+test('submitted contact emails are removed once the report has been sent', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const app = await setup({ videos });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+
+  const event = app.store.getEvent('live0000001');
+  event.submissions.push({ id: 's1', groupName: 'Ryhmä', watchers: 5, contactEmail: 'joku@example.com', createdAt: '2026-10-18T11:10:00Z' });
+  await app.tracker.sendReport(event, new Date('2026-10-19T12:00:00Z'));
+
+  assert.equal(event.submissions[0].contactEmail, null);
+  assert.equal(app.sent.length, 1);
+  assert.doesNotMatch(app.sent[0].text, /joku@example\.com/);
+  assert.match(app.sent[0].text, /- Ryhmä: 5/);
+});
+
+test('resolveVideo only creates events for configured channels', async () => {
+  const videos = new Map([
+    ['live0000001', makeVideo()],
+    ['other000002', makeVideo({ id: 'other000002', channelId: 'UCsomeoneElse000000000000' })],
+  ]);
+  const app = await setup({ videos });
+
+  assert.equal(await app.tracker.resolveVideo('other000002'), null);
+  assert.ok(await app.tracker.resolveVideo('live0000001'));
+  assert.equal(app.store.getEvent('other000002'), null);
+});
+
+test('a missing report configuration is logged and nothing is marked sent', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const app = await setup({ videos });
+  await app.store.updateSettings({ reportRecipient: '' });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
+  app.setTime('2026-10-20T12:00:00Z');
+  await app.tracker.tick();
+
+  assert.equal(app.sent.length, 0);
+  assert.equal(app.store.getEvent('live0000001').reportSentAt, null);
+  assert.equal(app.logs.length, 1);
+});

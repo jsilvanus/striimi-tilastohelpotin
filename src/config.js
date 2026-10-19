@@ -1,0 +1,22 @@
+const splitList = (value = '') =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+export function loadConfig(env = process.env) {
+  return {
+    port: Number(env.PORT ?? 3000),
+    publicBaseUrl: (env.PUBLIC_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+    dataFile: env.DATA_FILE ?? 'data/store.json',
+    youtubeApiKey: env.YOUTUBE_API_KEY ?? '',
+    youtubeChannelIds: splitList(env.YOUTUBE_CHANNEL_IDS),
+    pollIntervalSeconds: Number(env.POLL_INTERVAL_SECONDS ?? 60),
+    adminPassword: env.ADMIN_PASSWORD ?? '',
+    brevoApiKey: env.BREVO_API_KEY ?? '',
+    defaultSettings: {
+      parishName: env.PARISH_NAME ?? '',
+      parishLogoUrl: env.PARISH_LOGO_URL ?? '',
+    },
+  };
+}
