@@ -14,14 +14,16 @@ ja lähettää tilaisuuden päätyttyä raporttipyynnön sähköpostitse (Brevo)
   Live-katsojat voi laskea enimmäismäärästä tai keskiarvosta (oletus asetetaan ylläpidossa, yksittäinen
   tilaisuus voi ohittaa sen). Jokainen lomakeryhmä vähentää yhden live-katsojan, koska ryhmän näyttö
   näkyy YouTubessa yhtenä katsojana. Tallenteen katselut lasketaan päättymisestä tallennusajan loppuun:
-  jumalanpalvelus 3 vrk, muu tilaisuus oletuksena 7 vrk (enintään 21 vrk), kirkollinen toimitus ei lainkaan.
+  jumalanpalvelus: tilaisuuden päivä + 2 päivää (3 kalenteripäivää, suomen aikaa), muu tilaisuus oletuksena
+  7 päivää (enintään 21), kirkollinen toimitus ei lainkaan. Raportti lähtee tallennusajan viimeisen päivän
+  päättyessä (keskiyö).
 - **Verkkolomake.** Osoite on `/e/<videoId>` (YouTube) tai satunnainen linkki (manuaalinen).
   Sivulla näkyvät logo, tilaisuuden nimi, upotettu video ja lomake: ryhmän nimi tai nimimerkki,
   katsojamäärä ja valinnainen yhteystieto.
 - **Manuaaliset linkit.** Muita kuin YouTube-lähetyksiä varten ylläpito voi luoda linkin, jolle annetaan
   osoite ja päättymisaika.
-- **Raportti.** Päättymisen jälkeen (tyypin mukaan: jumalanpalvelus 48 h, kirkollinen toimitus heti,
-  muu 24 h) palvelu lähettää Brevon kautta sähköpostin. Pohjan tagit: `[EVENT NAME]`, `[EVENT URL]`,
+- **Raportti.** Tallennusajan päätyttyä (tyypin mukaan, ks. osallistujamäärä) palvelu lähettää Brevon
+  kautta sähköpostin. Pohjan tagit: `[EVENT NAME]`, `[EVENT URL]`,
   `[SUMMARY]`, `[FILLED FORMS]`, `[YOUTUBE COUNTS]`.
 
 ## Tietosuoja

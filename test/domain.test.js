@@ -81,12 +81,13 @@ test('an event with nothing measured has no estimate', () => {
   assert.equal(estimateParticipants(createEvent({ ...base }), settings).total, null);
 });
 
-test('reports are due after the storage boundary of the event type, or the event-level override', () => {
+test('the storage window counts calendar days in Finnish time, ending at midnight', () => {
   const end = '2026-10-18T12:00:00.000Z';
-  assert.equal(reportAt(createEvent({ ...base, endsAt: end })).toISOString(), '2026-10-21T12:00:00.000Z');
-  assert.equal(reportAt(createEvent({ ...base, eventType: 'other', endsAt: end })).toISOString(), '2026-10-25T12:00:00.000Z');
+  // Worship: the service day plus two more days, so Sunday runs through Tuesday.
+  assert.equal(reportAt(createEvent({ ...base, endsAt: end })).toISOString(), '2026-10-20T21:00:00.000Z');
+  assert.equal(reportAt(createEvent({ ...base, eventType: 'other', endsAt: end })).toISOString(), '2026-10-24T21:00:00.000Z');
+  assert.equal(reportAt(createEvent({ ...base, eventType: 'other', vodDays: 21, endsAt: end })).toISOString(), '2026-11-07T22:00:00.000Z');
   assert.equal(reportAt(createEvent({ ...base, eventType: 'ceremony', endsAt: end })).toISOString(), end);
-  assert.equal(reportAt(createEvent({ ...base, eventType: 'other', vodDays: 21, endsAt: end })).toISOString(), '2026-11-08T12:00:00.000Z');
   assert.equal(reportAt(createEvent({ ...base })), null);
 });
 

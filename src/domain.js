@@ -45,7 +45,6 @@ export const DEFAULT_SETTINGS = {
 
 const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 const MINUTE_MS = 60_000;
-const DAY_MS = 86_400_000;
 const TIME_ZONE = 'Europe/Helsinki';
 
 export function createEvent(fields) {
@@ -92,9 +91,21 @@ export function liveModelOf(event, settings) {
   return event.countingScheme ?? settings.liveModel;
 }
 
+function addCalendarDays(ymd, days) {
+  const date = new Date(`${ymd}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+// The storage window is whole calendar days in Finnish time: a service on day D is
+// stored through day D + (vodDays - 1), and the report is due at midnight that ends it.
+// Zero days means the report is due as soon as the event ends.
 export function reportAt(event) {
   if (!event.endsAt) return null;
-  return new Date(Date.parse(event.endsAt) + vodDaysOf(event) * DAY_MS);
+  const days = vodDaysOf(event);
+  if (days === 0) return new Date(event.endsAt);
+  const lastDay = toLocalInput(event.endsAt).slice(0, 10);
+  return new Date(fromLocalInput(`${addCalendarDays(lastDay, days)}T00:00`));
 }
 
 export function eventStatus(event, now) {
