@@ -1,8 +1,9 @@
 import {
   COUNTING_SCHEMES,
   EVENT_TYPES,
+  MAX_VOD_DAYS,
   TEMPLATE_KEYS,
-  countParticipants,
+  estimateParticipants,
   eventStatus,
   formatDateTime,
   toLocalInput,
@@ -117,22 +118,23 @@ function options(map, selected) {
 
 const LIVE_LABELS = { live: 'live', upcoming: 'tulossa', none: 'julkaistu' };
 
-function eventCard(event, now) {
+function eventCard(event, now, settings) {
   const id = encodeURIComponent(event.id);
-  const count = countParticipants(event);
+  const estimate = estimateParticipants(event, settings).total;
   const sent = event.reportSentAt
     ? `<p class="meta">Raportti lähetetty ${esc(formatDateTime(event.reportSentAt))}</p>`
     : '';
   return `<article class="card">
 <h3>${esc(event.title)}<span class="badge">${esc(eventStatus(event, now))}</span></h3>
-<p class="meta">${event.source === 'youtube' ? 'YouTube' : 'Manuaalinen linkki'} · ${esc(EVENT_TYPES[event.eventType].label)} · lomakkeita ${event.submissions.length} · osallistujat: ${esc(count ?? 'ei arvioitavissa')}</p>
+<p class="meta">${event.source === 'youtube' ? 'YouTube' : 'Manuaalinen linkki'} · ${esc(EVENT_TYPES[event.eventType].label)} · lomakkeita ${event.submissions.length} · osallistujat: ${esc(estimate ?? 'ei arvioitavissa')}</p>
 <p><a href="/e/${id}">Julkinen linkki</a></p>
 ${sent}
 <form method="post" action="/admin/events/${id}" class="stack">
 <div class="grid">
 <label>Nimi <input name="title" required maxlength="200" value="${esc(event.title)}"></label>
 <label>Tyyppi <select name="eventType">${options(EVENT_TYPES, event.eventType)}</select></label>
-<label>Laskentatapa <select name="countingScheme">${options(COUNTING_SCHEMES, event.countingScheme)}</select></label>
+<label>Laskentatapa <select name="countingScheme"><option value="">Oletus: ${esc(COUNTING_SCHEMES[settings.liveModel])}</option>${options(COUNTING_SCHEMES, event.countingScheme ?? '')}</select></label>
+<label>Tallennusaika (vrk, tyhjä = oletus ${EVENT_TYPES[event.eventType].vodDays}) <input type="number" name="vodDays" min="0" max="${MAX_VOD_DAYS}" value="${esc(event.vodDays ?? '')}"></label>
 <label>Päättyi (Suomen aika) <input type="datetime-local" name="endsAt" value="${toLocalInput(event.endsAt)}"></label>
 </div>
 <label class="check"><input type="checkbox" name="enabled"${event.enabled ? ' checked' : ''}> Seurataan ja lomake käytössä</label>
@@ -167,6 +169,7 @@ function settingsForm(settings) {
 <label>Lähettäjän nimi <input name="senderName" maxlength="100" value="${esc(settings.senderName)}"></label>
 <label>Lähettäjän sähköposti (vahvistettu Brevossa) <input type="email" name="senderEmail" maxlength="200" value="${esc(settings.senderEmail)}"></label>
 </div>
+<label>Oletuslaskentatapa (live) <select name="liveModel">${options(COUNTING_SCHEMES, settings.liveModel)}</select></label>
 <label>Sähköpostin aihe <input name="emailSubject" required maxlength="300" value="${esc(settings.emailSubject)}"></label>
 <label>Sähköpostin runko <textarea name="emailBody" required maxlength="10000">${esc(settings.emailBody)}</textarea></label>
 <p class="meta">Käytettävät tagit: ${TEMPLATE_KEYS.map((key) => `[${esc(key)}]`).join(' ')}</p>
@@ -194,7 +197,7 @@ ${videoSection(videos, videosError, tracked)}
 </section>
 <section>
 <h2>Tilaisuudet (${events.length})</h2>
-${events.map((event) => eventCard(event, now)).join('') || '<p class="meta">Ei tilaisuuksia.</p>'}
+${events.map((event) => eventCard(event, now, settings)).join('') || '<p class="meta">Ei tilaisuuksia.</p>'}
 </section>
 <section>
 <h2>Asetukset ja raporttisähköposti</h2>

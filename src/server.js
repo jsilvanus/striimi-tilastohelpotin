@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { COUNTING_SCHEMES, EVENT_TYPES, createEvent, fromLocalInput, isFormOpen } from './domain.js';
+import { COUNTING_SCHEMES, EVENT_TYPES, MAX_VOD_DAYS, createEvent, fromLocalInput, isFormOpen } from './domain.js';
 import * as views from './views.js';
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -73,6 +73,21 @@ function optionalDate(value) {
 function enumValue(value, allowed, label) {
   if (!Object.hasOwn(allowed, value)) throw new HttpError(400, `Virheellinen ${label}.`);
   return value;
+}
+
+// An empty select means "use the default" and is stored as null.
+function optionalEnum(value, allowed, label) {
+  return String(value ?? '') === '' ? null : enumValue(value, allowed, label);
+}
+
+function parseVodDays(value) {
+  const input = String(value ?? '').trim();
+  if (input === '') return null;
+  const days = Number(input);
+  if (!Number.isInteger(days) || days < 0 || days > MAX_VOD_DAYS) {
+    throw new HttpError(400, `Tallennusaika on oltava 0–${MAX_VOD_DAYS} vrk.`);
+  }
+  return days;
 }
 
 function parseSubmission(form) {
@@ -205,6 +220,7 @@ export function createApp({ config, store, tracker, youtube = null }) {
     const settings = {
       parishName: text(form, 'parishName'),
       parishLogoUrl: text(form, 'parishLogoUrl'),
+      liveModel: enumValue(form.get('liveModel'), COUNTING_SCHEMES, 'laskentatapa'),
       reportRecipient: text(form, 'reportRecipient'),
       senderName: text(form, 'senderName'),
       senderEmail: text(form, 'senderEmail'),
@@ -276,7 +292,8 @@ export function createApp({ config, store, tracker, youtube = null }) {
     Object.assign(event, {
       title,
       eventType: enumValue(form.get('eventType'), EVENT_TYPES, 'tyyppi'),
-      countingScheme: enumValue(form.get('countingScheme'), COUNTING_SCHEMES, 'laskentatapa'),
+      countingScheme: optionalEnum(form.get('countingScheme'), COUNTING_SCHEMES, 'laskentatapa'),
+      vodDays: parseVodDays(form.get('vodDays')),
       endsAt: optionalDate(form.get('endsAt')),
       closedAt: null,
       enabled: form.has('enabled'),

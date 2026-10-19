@@ -1,13 +1,16 @@
+// vodDays: how long after the end the recording is counted (the stats recording boundary).
 export const EVENT_TYPES = {
-  worship: { label: 'Jumalanpalvelus', reportAfterHours: 48 },
-  ceremony: { label: 'Kirkollinen toimitus', reportAfterHours: 0 },
-  other: { label: 'Muu tilaisuus', reportAfterHours: 24 },
+  worship: { label: 'Jumalanpalvelus', vodDays: 3 },
+  ceremony: { label: 'Kirkollinen toimitus', vodDays: 0 },
+  other: { label: 'Muu tilaisuus', vodDays: 7 },
 };
 
+export const MAX_VOD_DAYS = 21;
+
+// Live models; the global default is set in settings and can be overridden per event.
 export const COUNTING_SCHEMES = {
   max_concurrent: 'Samanaikaisten katsojien enimmäismäärä',
   average_concurrent: 'Samanaikaisten katsojien keskiarvo',
-  views: 'Katselukerrat yhteensä',
 };
 
 export const CLOSE_GRACE_MINUTES = 30;
@@ -15,6 +18,7 @@ export const CLOSE_GRACE_MINUTES = 30;
 export const TEMPLATE_KEYS = ['EVENT NAME', 'EVENT URL', 'SUMMARY', 'FILLED FORMS', 'YOUTUBE COUNTS'];
 
 export const DEFAULT_SETTINGS = {
+  liveModel: 'average_concurrent',
   parishName: '',
   parishLogoUrl: '',
   reportRecipient: '',
@@ -41,7 +45,7 @@ export const DEFAULT_SETTINGS = {
 
 const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 const MINUTE_MS = 60_000;
-const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
 const TIME_ZONE = 'Europe/Helsinki';
 
 export function createEvent(fields) {
@@ -49,7 +53,9 @@ export function createEvent(fields) {
     source: 'manual',
     title: '',
     eventType: 'other',
-    countingScheme: 'max_concurrent',
+    countingScheme: null,
+    vodDays: null,
+    viewCountAtEnd: null,
     url: null,
     channelId: null,
     startsAt: null,
@@ -78,11 +84,17 @@ export function isFormOpen(event, now) {
   return !closing || now < closing;
 }
 
-// Guidelines: worship services are counted two days after they end,
-// ceremonies only while they are being watched, other events after a day.
+export function vodDaysOf(event) {
+  return event.vodDays ?? EVENT_TYPES[event.eventType].vodDays;
+}
+
+export function liveModelOf(event, settings) {
+  return event.countingScheme ?? settings.liveModel;
+}
+
 export function reportAt(event) {
   if (!event.endsAt) return null;
-  return new Date(Date.parse(event.endsAt) + EVENT_TYPES[event.eventType].reportAfterHours * HOUR_MS);
+  return new Date(Date.parse(event.endsAt) + vodDaysOf(event) * DAY_MS);
 }
 
 export function eventStatus(event, now) {
@@ -107,17 +119,29 @@ export function averageViewers(event) {
 }
 
 // YouTube Analytics values (fetched at report time) are preferred over our own samples.
-export function countParticipants(event) {
-  switch (event.countingScheme) {
-    case 'max_concurrent':
-      return event.analytics?.peakConcurrentViewers ?? maxViewers(event);
-    case 'average_concurrent':
-      return event.analytics?.averageConcurrentViewers ?? averageViewers(event);
-    case 'views':
-      return event.youtube?.viewCount ?? null;
-    default:
-      throw new Error(`Unknown counting scheme: ${event.countingScheme}`);
-  }
+export function liveValue(event, model) {
+  if (model === 'max_concurrent') return event.analytics?.peakConcurrentViewers ?? maxViewers(event);
+  return event.analytics?.averageConcurrentViewers ?? averageViewers(event);
+}
+
+// Views accrued on the recording between the end of the stream and the storage boundary.
+export function vodViews(event) {
+  if (vodDaysOf(event) === 0) return 0;
+  if (event.viewCountAtEnd == null || event.youtube?.viewCount == null) return null;
+  return Math.max(0, event.youtube.viewCount - event.viewCountAtEnd);
+}
+
+// Total = live viewers (each registered group replaces one live viewer) + group watchers + recording views.
+export function estimateParticipants(event, settings) {
+  const model = liveModelOf(event, settings);
+  const live = liveValue(event, model);
+  const groups = event.submissions.length;
+  const watchers = event.submissions.reduce((sum, submission) => sum + submission.watchers, 0);
+  const liveAfterGroups = live === null ? null : Math.max(0, live - groups);
+  const vod = vodViews(event);
+  const unknown = liveAfterGroups === null && vod === null && groups === 0;
+  const total = unknown ? null : (liveAfterGroups ?? 0) + watchers + (vod ?? 0);
+  return { model, live, groups, watchers, liveAfterGroups, vod, total };
 }
 
 export function renderTemplate(template, values) {
@@ -127,29 +151,32 @@ export function renderTemplate(template, values) {
   );
 }
 
+const orUnavailable = (value) => value ?? 'ei saatavilla';
+
 export function youtubeCountLines(event) {
   if (event.source !== 'youtube') return 'Ei YouTube-tietoja (manuaalinen linkki).';
   const lines = [
-    ['Samanaikaisia katsojia (enimmäismäärä)', event.analytics?.peakConcurrentViewers ?? maxViewers(event)],
-    ['Samanaikaisia katsojia (keskiarvo)', event.analytics?.averageConcurrentViewers ?? averageViewers(event)],
+    ['Samanaikaisia katsojia (enimmäismäärä)', liveValue(event, 'max_concurrent')],
+    ['Samanaikaisia katsojia (keskiarvo)', liveValue(event, 'average_concurrent')],
     ['Katselukerrat yhteensä', event.youtube?.viewCount ?? null],
+    [`Tallenteen katselut (${vodDaysOf(event)} vrk päättymisestä)`, vodViews(event)],
   ];
-  return lines.map(([label, value]) => `${label}: ${value ?? 'ei saatavilla'}`).join('\n');
+  return lines.map(([label, value]) => `${label}: ${orUnavailable(value)}`).join('\n');
 }
 
 export function buildReport(event, settings, publicBaseUrl) {
-  const participants = countParticipants(event);
-  const watchers = event.submissions.reduce((sum, submission) => sum + submission.watchers, 0);
+  const est = estimateParticipants(event, settings);
   const values = {
     'EVENT NAME': event.title,
     'EVENT URL': `${publicBaseUrl}/e/${event.id}`,
     SUMMARY: [
       `Tyyppi: ${EVENT_TYPES[event.eventType].label}`,
       `Päättyi: ${event.endsAt ? formatDateTime(event.endsAt) : 'ei tiedossa'}`,
-      `Lomakkeita: ${event.submissions.length}, katsojia lomakkeilla yhteensä: ${watchers}`,
-      participants === null
-        ? 'Verkon kautta osallistuneita ei voitu arvioida.'
-        : `Verkon kautta osallistuneet (${COUNTING_SCHEMES[event.countingScheme]}): ${participants}`,
+      `Live-katsojat (${COUNTING_SCHEMES[est.model]}): ${orUnavailable(est.live)}`,
+      `Lomakeryhmiä: ${est.groups}, ryhmien katsojia yhteensä: ${est.watchers}`,
+      `Live-luku ryhmien jälkeen (ryhmä vähentää yhden live-katsojan): ${orUnavailable(est.liveAfterGroups)}`,
+      `Tallenteen katselut (${vodDaysOf(event)} vrk päättymisestä): ${orUnavailable(est.vod)}`,
+      est.total === null ? 'Osallistujia ei voitu arvioida.' : `Osallistujat yhteensä: ${est.total}`,
     ].join('\n'),
     'FILLED FORMS': event.submissions.length
       ? event.submissions.map((submission) => `- ${submission.groupName}: ${submission.watchers}`).join('\n')

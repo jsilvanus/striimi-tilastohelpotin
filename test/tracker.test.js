@@ -96,7 +96,7 @@ test('a live stream is discovered once and sampled on every tick', async () => {
 
   const event = app.store.getEvent('live0000001');
   assert.equal(event.source, 'youtube');
-  assert.equal(event.countingScheme, 'max_concurrent');
+  assert.equal(event.countingScheme, null);
   assert.deepEqual(event.samples.map((s) => s.viewers), [40, 55]);
   assert.equal(app.store.listEvents().length, 1);
 });
@@ -112,8 +112,8 @@ test('when a stream ends its end time is recorded and the report is sent once, a
   assert.equal(app.store.getEvent('live0000001').endsAt, '2026-10-18T11:00:00Z');
   assert.equal(app.sent.length, 0, 'not before the reporting delay has passed');
 
-  // Other events are reported after a day, so jump past the reporting time.
-  app.setTime('2026-10-19T12:00:01Z');
+  // Other events are counted for 7 days after the end, so jump past the storage boundary.
+  app.setTime('2026-10-25T11:00:01Z');
   await app.tracker.tick();
   await app.tracker.tick();
 
@@ -159,7 +159,7 @@ test('a missing report configuration is logged and nothing is marked sent', asyn
   await app.store.updateSettings({ reportRecipient: '' });
   await app.tracker.tick();
   videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
-  app.setTime('2026-10-20T12:00:00Z');
+  app.setTime('2026-10-26T12:00:00Z');
   await app.tracker.tick();
 
   assert.equal(app.sent.length, 0);
@@ -208,4 +208,21 @@ test('a failing Analytics call falls back to the sampled values and is logged', 
   assert.equal(app.sent.length, 1);
   assert.match(app.sent[0].text, /enimmäismäärä\): 40/);
   assert.equal(app.logs.length, 1);
+});
+
+test('recording views are counted from the view count at the end of the stream', async () => {
+  const videos = new Map([['live0000001', makeVideo({ viewCount: 500 })]]);
+  const app = await setup({ videos });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null, viewCount: 520 }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+  assert.equal(app.store.getEvent('live0000001').viewCountAtEnd, 520);
+
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null, viewCount: 610 }));
+  app.setTime('2026-10-25T11:00:01Z');
+  await app.tracker.tick();
+
+  assert.equal(app.sent.length, 1);
+  assert.match(app.sent[0].text, /Tallenteen katselut \(7 vrk päättymisestä\): 90/);
 });

@@ -16,13 +16,11 @@ export function createTracker({ config, store, youtube = null, analytics = null,
   }
 
   function eventFromVideo(video, ts) {
-    const live = video.liveBroadcastContent !== 'none';
     return createEvent({
       id: video.id,
       source: 'youtube',
       title: video.title,
       channelId: video.channelId,
-      countingScheme: live ? 'max_concurrent' : 'views',
       startsAt: video.actualStartTime ?? video.scheduledStartTime ?? video.publishedAt,
       endsAt: video.actualEndTime,
       createdAt: ts.toISOString(),
@@ -36,6 +34,10 @@ export function createTracker({ config, store, youtube = null, analytics = null,
       event.samples.push({ at: ts.toISOString(), viewers: video.concurrentViewers });
     }
     if (video.actualEndTime && !event.endsAt) event.endsAt = video.actualEndTime;
+    // The recording's views are counted from the end of the stream, so keep the count at that point.
+    if (event.endsAt && event.viewCountAtEnd == null && video.viewCount != null && Date.parse(event.endsAt) <= ts) {
+      event.viewCountAtEnd = video.viewCount;
+    }
   }
 
   // Finds new live and upcoming streams on the configured channels.

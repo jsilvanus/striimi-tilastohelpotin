@@ -3,56 +3,97 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SETTINGS,
   buildReport,
-  countParticipants,
   createEvent,
+  estimateParticipants,
   fromLocalInput,
   isFormOpen,
+  liveValue,
   renderTemplate,
   reportAt,
   toLocalInput,
+  vodViews,
 } from '../src/domain.js';
 
 const base = { id: 'abc12345678', source: 'youtube', title: 'Jumalanpalvelus', eventType: 'worship' };
+const settings = { ...DEFAULT_SETTINGS, liveModel: 'average_concurrent' };
+const submission = (groupName, watchers, contactEmail = null) => ({ id: groupName, groupName, watchers, contactEmail, createdAt: '2026-10-18T12:00:00Z' });
 
-test('max_concurrent uses the highest sampled viewer count', () => {
-  const event = createEvent({ ...base, countingScheme: 'max_concurrent', samples: [{ viewers: 10 }, { viewers: 42 }, { viewers: 30 }] });
-  assert.equal(countParticipants(event), 42);
+test('live value uses the peak or the average of our samples', () => {
+  const event = createEvent({ ...base, samples: [{ viewers: 10 }, { viewers: 42 }, { viewers: 15 }] });
+  assert.equal(liveValue(event, 'max_concurrent'), 42);
+  assert.equal(liveValue(event, 'average_concurrent'), 22);
+  assert.equal(liveValue(createEvent({ ...base }), 'max_concurrent'), null);
 });
 
-test('average_concurrent rounds the mean of the samples', () => {
-  const event = createEvent({ ...base, countingScheme: 'average_concurrent', samples: [{ viewers: 10 }, { viewers: 15 }] });
-  assert.equal(countParticipants(event), 13);
+test('Analytics values are preferred over samples', () => {
+  const event = createEvent({
+    ...base,
+    samples: [{ viewers: 10 }],
+    analytics: { peakConcurrentViewers: 90, averageConcurrentViewers: 30 },
+  });
+  assert.equal(liveValue(event, 'max_concurrent'), 90);
+  assert.equal(liveValue(event, 'average_concurrent'), 30);
 });
 
-test('views uses the YouTube view count and is null without one', () => {
-  assert.equal(countParticipants(createEvent({ ...base, countingScheme: 'views', youtube: { viewCount: 120 } })), 120);
-  assert.equal(countParticipants(createEvent({ ...base, countingScheme: 'views' })), null);
+test('each registered group replaces one live viewer, then group watchers and recording views are added', () => {
+  const event = createEvent({
+    ...base,
+    endsAt: '2026-10-18T12:00:00.000Z',
+    countingScheme: 'max_concurrent',
+    samples: [{ viewers: 10 }, { viewers: 40 }, { viewers: 30 }],
+    youtube: { viewCount: 160 },
+    viewCountAtEnd: 100,
+    submissions: [submission('Nuoret', 12), submission('Vanhainkoti', 8)],
+  });
+  const est = estimateParticipants(event, settings);
+  assert.equal(est.model, 'max_concurrent');
+  assert.equal(est.live, 40);
+  assert.equal(est.liveAfterGroups, 38);
+  assert.equal(est.watchers, 20);
+  assert.equal(est.vod, 60);
+  assert.equal(est.total, 118);
 });
 
-test('schemes without samples are not estimable', () => {
-  assert.equal(countParticipants(createEvent({ ...base, countingScheme: 'max_concurrent' })), null);
-  assert.equal(countParticipants(createEvent({ ...base, countingScheme: 'average_concurrent' })), null);
+test('the event model overrides the global default, and the global default applies otherwise', () => {
+  const event = createEvent({ ...base, samples: [{ viewers: 10 }, { viewers: 40 }] });
+  assert.equal(estimateParticipants(event, settings).model, 'average_concurrent');
+  assert.equal(estimateParticipants({ ...event, countingScheme: 'max_concurrent' }, settings).live, 40);
 });
 
-test('form stays open for the grace period after the event has ended', () => {
+test('live viewers never go below zero when there are more groups than viewers', () => {
+  const event = createEvent({
+    ...base,
+    samples: [{ viewers: 1 }],
+    submissions: [submission('A', 3), submission('B', 4)],
+  });
+  assert.equal(estimateParticipants(event, settings).liveAfterGroups, 0);
+  assert.equal(estimateParticipants(event, settings).total, 7);
+});
+
+test('recording views are unknown until the end count is known, and zero for ceremonies', () => {
+  const withoutEnd = createEvent({ ...base, youtube: { viewCount: 50 } });
+  assert.equal(vodViews(withoutEnd), null);
+  const ceremony = createEvent({ ...base, eventType: 'ceremony', youtube: { viewCount: 50 } });
+  assert.equal(vodViews(ceremony), 0);
+});
+
+test('an event with nothing measured has no estimate', () => {
+  assert.equal(estimateParticipants(createEvent({ ...base }), settings).total, null);
+});
+
+test('reports are due after the storage boundary of the event type, or the event-level override', () => {
+  const end = '2026-10-18T12:00:00.000Z';
+  assert.equal(reportAt(createEvent({ ...base, endsAt: end })).toISOString(), '2026-10-21T12:00:00.000Z');
+  assert.equal(reportAt(createEvent({ ...base, eventType: 'other', endsAt: end })).toISOString(), '2026-10-25T12:00:00.000Z');
+  assert.equal(reportAt(createEvent({ ...base, eventType: 'ceremony', endsAt: end })).toISOString(), end);
+  assert.equal(reportAt(createEvent({ ...base, eventType: 'other', vodDays: 21, endsAt: end })).toISOString(), '2026-11-08T12:00:00.000Z');
+  assert.equal(reportAt(createEvent({ ...base })), null);
+});
+
+test('the form stays open for the grace period after the event has ended', () => {
   const event = createEvent({ ...base, endsAt: '2026-10-18T12:00:00.000Z' });
   assert.equal(isFormOpen(event, new Date('2026-10-18T12:20:00.000Z')), true);
   assert.equal(isFormOpen(event, new Date('2026-10-18T12:31:00.000Z')), false);
-});
-
-test('form is open while the end time is unknown and closed when disabled', () => {
-  assert.equal(isFormOpen(createEvent({ ...base }), new Date()), true);
-  assert.equal(isFormOpen(createEvent({ ...base, enabled: false }), new Date()), false);
-});
-
-test('worship services are reported 48 hours after they end', () => {
-  const event = createEvent({ ...base, endsAt: '2026-10-18T12:00:00.000Z' });
-  assert.equal(reportAt(event).toISOString(), '2026-10-20T12:00:00.000Z');
-});
-
-test('ceremonies are reported right after they end', () => {
-  const event = createEvent({ ...base, eventType: 'ceremony', endsAt: '2026-10-18T12:00:00.000Z' });
-  assert.equal(reportAt(event).toISOString(), '2026-10-18T12:00:00.000Z');
 });
 
 test('renderTemplate replaces known tags in a single pass and leaves others alone', () => {
@@ -60,25 +101,24 @@ test('renderTemplate replaces known tags in a single pass and leaves others alon
   assert.equal(out, '[SUMMARY] x [UNKNOWN]');
 });
 
-test('buildReport fills the tags and leaves contact emails out of the email', () => {
+test('buildReport lists the breakdown and leaves contact emails out of the email', () => {
   const event = createEvent({
     ...base,
     endsAt: '2026-10-18T12:00:00.000Z',
     samples: [{ viewers: 25 }],
     youtube: { viewCount: 300 },
-    submissions: [
-      { groupName: 'Nuorten ryhmä', watchers: 12, contactEmail: 'secret@example.com' },
-      { groupName: 'Vanhainkoti', watchers: 8, contactEmail: null },
-    ],
+    viewCountAtEnd: 200,
+    countingScheme: 'max_concurrent',
+    submissions: [submission('Nuorten ryhmä', 12, 'secret@example.com'), submission('Vanhainkoti', 8)],
   });
-  const settings = { ...DEFAULT_SETTINGS, reportRecipient: 'tilasto@example.com', senderEmail: 'a@example.com' };
-  const { subject, text } = buildReport(event, settings, 'https://striimi.example.fi');
+  const { subject, text } = buildReport(event, { ...settings, reportRecipient: 'tilasto@example.com', senderEmail: 'a@example.com' }, 'https://striimi.example.fi');
 
   assert.equal(subject, 'Tilastoi striimin osallistujat: Jumalanpalvelus');
   assert.match(text, /https:\/\/striimi\.example\.fi\/e\/abc12345678/);
   assert.match(text, /- Nuorten ryhmä: 12\n- Vanhainkoti: 8/);
-  assert.match(text, /Samanaikaisia katsojia \(enimmäismäärä\): 25/);
-  assert.match(text, /Katselukerrat yhteensä: 300/);
+  assert.match(text, /Live-luku ryhmien jälkeen .*: 23/);
+  assert.match(text, /Tallenteen katselut \(3 vrk päättymisestä\): 100/);
+  assert.match(text, /Osallistujat yhteensä: 143/);
   assert.doesNotMatch(text, /secret@example\.com/);
   assert.doesNotMatch(text, /\[(EVENT NAME|SUMMARY|FILLED FORMS|YOUTUBE COUNTS)\]/);
 });

@@ -10,8 +10,11 @@ ja lähettää tilaisuuden päätyttyä raporttipyynnön sähköpostitse (Brevo)
 - **Striimien ja videoiden seuranta.** Palvelu löytää seurakunnan kanavilta live- ja tulevat striimit
   automaattisesti. Julkaistut videot listataan ylläpitonäkymässä, josta ne voi ottaa seurantaan.
 - **Samanaikaisten katsojien näytteenotto.** Käynnissä olevasta striimistä otetaan näyte minuutin välein.
-- **Laskentatavat.** Samanaikaisten katsojien enimmäismäärä, keskiarvo (katseluaika jaettuna kestolla)
-  tai katselukerrat yhteensä. Tapa valitaan jokaiselle tilaisuudelle erikseen.
+- **Osallistujamäärä.** Yhteensä = live-katsojat + lomakeryhmien katsojat + tallenteen katselut.
+  Live-katsojat voi laskea enimmäismäärästä tai keskiarvosta (oletus asetetaan ylläpidossa, yksittäinen
+  tilaisuus voi ohittaa sen). Jokainen lomakeryhmä vähentää yhden live-katsojan, koska ryhmän näyttö
+  näkyy YouTubessa yhtenä katsojana. Tallenteen katselut lasketaan päättymisestä tallennusajan loppuun:
+  jumalanpalvelus 3 vrk, muu tilaisuus oletuksena 7 vrk (enintään 21 vrk), kirkollinen toimitus ei lainkaan.
 - **Verkkolomake.** Osoite on `/e/<videoId>` (YouTube) tai satunnainen linkki (manuaalinen).
   Sivulla näkyvät logo, tilaisuuden nimi, upotettu video ja lomake: ryhmän nimi tai nimimerkki,
   katsojamäärä ja valinnainen yhteystieto.
