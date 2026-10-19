@@ -11,6 +11,11 @@ export function loadConfig(env = process.env) {
     dataFile: env.DATA_FILE ?? 'data/store.json',
     youtubeApiKey: env.YOUTUBE_API_KEY ?? '',
     youtubeChannelIds: splitList(env.YOUTUBE_CHANNEL_IDS),
+    oauth: {
+      clientId: env.YOUTUBE_OAUTH_CLIENT_ID ?? '',
+      clientSecret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? '',
+      refreshToken: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? '',
+    },
     pollIntervalSeconds: Number(env.POLL_INTERVAL_SECONDS ?? 60),
     adminPassword: env.ADMIN_PASSWORD ?? '',
     brevoApiKey: env.BREVO_API_KEY ?? '',

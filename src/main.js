@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
+import { createAnalyticsClient } from './analytics.js';
 import { createMailer } from './brevo.js';
 import { loadConfig } from './config.js';
 import { DEFAULT_SETTINGS } from './domain.js';
 import { createApp } from './server.js';
 import { createStore } from './store.js';
+import { createTokenProvider } from './oauth.js';
 import { createTracker } from './tracker.js';
 import { createYouTubeClient } from './youtube.js';
 
@@ -15,7 +17,12 @@ const store = await createStore({
 });
 const youtube = config.youtubeApiKey ? createYouTubeClient({ apiKey: config.youtubeApiKey }) : null;
 const mailer = config.brevoApiKey ? createMailer({ apiKey: config.brevoApiKey }) : null;
-const tracker = createTracker({ config, store, youtube, mailer });
+const { clientId, clientSecret, refreshToken } = config.oauth;
+const analytics =
+  clientId && clientSecret && refreshToken
+    ? createAnalyticsClient({ tokenProvider: createTokenProvider({ clientId, clientSecret, refreshToken }) })
+    : null;
+const tracker = createTracker({ config, store, youtube, analytics, mailer });
 
 tracker.start(config.pollIntervalSeconds * 1000);
 

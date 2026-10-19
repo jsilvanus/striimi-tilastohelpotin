@@ -46,11 +46,27 @@ npm start
 | `DATA_FILE` | JSON-tiedoston polku (oletus `data/store.json`) |
 | `YOUTUBE_API_KEY` | YouTube Data API -avain. Ilman sitä YouTube-seuranta on pois päältä |
 | `YOUTUBE_CHANNEL_IDS` | Pilkuilla erotettuna seurakunnan kanavien ID:t (alkavat `UC`) |
+| `YOUTUBE_OAUTH_CLIENT_ID` | OAuth-asiakkaan tunnus. Tarvitaan YouTube Analytics -tietoihin |
+| `YOUTUBE_OAUTH_CLIENT_SECRET` | OAuth-asiakkaan salaisuus |
+| `YOUTUBE_OAUTH_REFRESH_TOKEN` | Pitkäikäinen tunnus, jonka saat komennolla `npm run oauth-setup` |
 | `POLL_INTERVAL_SECONDS` | Seurantakierroksen väli (oletus 60) |
 | `ADMIN_PASSWORD` | Ylläpitonäkymän salasana (Basic-autentikointi, käyttäjänimi mikä tahansa). Ilman sitä ylläpito on pois käytöstä |
 | `BREVO_API_KEY` | Brevo-API-avain raporttien lähettämiseen |
 | `PARISH_NAME` | Seurakunnan nimi (oletusasetus, muutettavissa ylläpidossa) |
 | `PARISH_LOGO_URL` | Seurakunnan logon https-osoite (oletusasetus) |
+
+### YouTube Analytics (OAuth)
+
+Raportin lopulliset luvut (samanaikaisten katsojien enimmäismäärä ja keskiarvo) haetaan
+YouTube Analytics -rajapinnasta. Se vaatii kanavan omistajan tai ylläpitäjän suostumuksen:
+
+1. Luo Google Cloud -projektiin OAuth-asiakas, ja lisää sen sallituksi uudelleenohjausosoitteeksi
+   `http://localhost:8787/oauth2callback`. Ota käyttöön YouTube Analytics API.
+2. Aja `YOUTUBE_OAUTH_CLIENT_ID=... YOUTUBE_OAUTH_CLIENT_SECRET=... npm run oauth-setup`, avaa tulostettu
+   osoite ja hyväksy käyttöoikeus seurakunnan kanavan tilille.
+3. Tallenna tulostettu `YOUTUBE_OAUTH_REFRESH_TOKEN` palvelun ympäristömuuttujiin.
+
+Jos Analytics-haku epäonnistuu tai dataa ei vielä ole, raportti käyttää tilaisuuden aikana otettuja näytteitä.
 
 Raportin vastaanottaja, lähettäjän sähköposti (vahvistettu Brevossa) ja sähköpostipohja asetetaan
 ylläpitonäkymän asetuksissa osoitteessa `/admin`.
@@ -62,7 +78,9 @@ joka maksaa 100 yksikköä. Kiintiön käyttö pysyy siis pienenä.
 
 ## Rajoitukset
 
-- Katseluaikaa (esim. yli minuutin katsomiset) ei vielä lasketa YouTube Analytics -rajapinnasta.
-  Keskiarvo samanaikaisista katsojista on tässä vaiheessa likiarvo.
+- Katseluaikaa (esim. yli minuutin katsomiset) ei vielä lasketa. Samanaikaisten katsojien
+  enimmäismäärä ja keskiarvo tulevat Analytics-rajapinnasta, kun OAuth on määritetty.
+- Analytics-rajapinnan `livestreamPosition`-dimensiota (aikasarja minuuteittain) ei ole vielä
+  otettu käyttöön, koska sen tarkkuutta ei ole testattu.
 - Palvelu tallentaa tiedot yhteen JSON-tiedostoon. Se sopii yhdelle prosessille, ei useammalle rinnakkain.
 - Sähköpostin lähettäjä on vahvistettava Brevossa, ja raportin vastaanottaja on asetettava ylläpidossa.

@@ -55,6 +55,7 @@ export function createEvent(fields) {
     startsAt: null,
     endsAt: null,
     closedAt: null,
+    analytics: null,
     enabled: true,
     samples: [],
     youtube: null,
@@ -105,12 +106,13 @@ export function averageViewers(event) {
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
+// YouTube Analytics values (fetched at report time) are preferred over our own samples.
 export function countParticipants(event) {
   switch (event.countingScheme) {
     case 'max_concurrent':
-      return maxViewers(event);
+      return event.analytics?.peakConcurrentViewers ?? maxViewers(event);
     case 'average_concurrent':
-      return averageViewers(event);
+      return event.analytics?.averageConcurrentViewers ?? averageViewers(event);
     case 'views':
       return event.youtube?.viewCount ?? null;
     default:
@@ -128,8 +130,8 @@ export function renderTemplate(template, values) {
 export function youtubeCountLines(event) {
   if (event.source !== 'youtube') return 'Ei YouTube-tietoja (manuaalinen linkki).';
   const lines = [
-    ['Samanaikaisia katsojia (enimmäismäärä)', maxViewers(event)],
-    ['Samanaikaisia katsojia (keskiarvo)', averageViewers(event)],
+    ['Samanaikaisia katsojia (enimmäismäärä)', event.analytics?.peakConcurrentViewers ?? maxViewers(event)],
+    ['Samanaikaisia katsojia (keskiarvo)', event.analytics?.averageConcurrentViewers ?? averageViewers(event)],
     ['Katselukerrat yhteensä', event.youtube?.viewCount ?? null],
   ];
   return lines.map(([label, value]) => `${label}: ${value ?? 'ei saatavilla'}`).join('\n');

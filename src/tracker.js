@@ -2,7 +2,7 @@ import { buildReport, createEvent, reportAt } from './domain.js';
 
 const MISSING_VIDEO_TTL_MS = 10 * 60_000;
 
-export function createTracker({ config, store, youtube = null, mailer = null, now = () => new Date(), log = console }) {
+export function createTracker({ config, store, youtube = null, analytics = null, mailer = null, now = () => new Date(), log = console }) {
   const missingVideos = new Map();
   let running = false;
   let timer = null;
@@ -61,6 +61,24 @@ export function createTracker({ config, store, youtube = null, mailer = null, no
     await store.save();
   }
 
+  // Analytics data lags the stream slightly, so it is fetched when the report is due.
+  // If it is unavailable, the report falls back to the values sampled during the stream.
+  async function fetchAnalytics(event, ts) {
+    if (!analytics || event.source !== 'youtube' || event.analytics) return;
+    const startDate = (event.startsAt ?? event.createdAt).slice(0, 10);
+    try {
+      const totals = await analytics.getLivestreamTotals({
+        channelId: event.channelId,
+        videoId: event.id,
+        startDate,
+        endDate: ts.toISOString().slice(0, 10),
+      });
+      if (totals) event.analytics = { ...totals, fetchedAt: ts.toISOString() };
+    } catch (err) {
+      log.error(`YouTube Analytics -haku epäonnistui (${event.id}), käytetään näytteitä: ${err.message}`);
+    }
+  }
+
   async function sendReport(event, ts = now()) {
     if (event.reportSentAt) throw new Error('Raportti on jo lähetetty.');
     if (!mailer) throw new Error('Sähköpostia ei voi lähettää: BREVO_API_KEY puuttuu.');
@@ -68,6 +86,7 @@ export function createTracker({ config, store, youtube = null, mailer = null, no
     if (!settings.reportRecipient || !settings.senderEmail) {
       throw new Error('Asetuksista puuttuu raportin vastaanottaja tai lähettäjän sähköposti.');
     }
+    await fetchAnalytics(event, ts);
     const { subject, text } = buildReport(event, settings, config.publicBaseUrl);
     await mailer.send({
       sender: { name: settings.senderName || settings.senderEmail, email: settings.senderEmail },

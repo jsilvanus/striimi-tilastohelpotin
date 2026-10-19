@@ -36,7 +36,7 @@ function fakeYouTube(videos) {
   };
 }
 
-async function setup({ videos = new Map(), start = '2026-10-18T10:00:00Z' } = {}) {
+async function setup({ videos = new Map(), analytics = null, start = '2026-10-18T10:00:00Z' } = {}) {
   let clock = new Date(start);
   const sent = [];
   const logs = [];
@@ -51,6 +51,7 @@ async function setup({ videos = new Map(), start = '2026-10-18T10:00:00Z' } = {}
     config: { youtubeChannelIds: [CHANNEL], publicBaseUrl: 'https://striimi.example.fi' },
     store,
     youtube: fakeYouTube(videos),
+    analytics,
     mailer: { async send(message) { sent.push(message); } },
     now: () => clock,
     log: { error: (message) => logs.push(message) },
@@ -163,5 +164,48 @@ test('a missing report configuration is logged and nothing is marked sent', asyn
 
   assert.equal(app.sent.length, 0);
   assert.equal(app.store.getEvent('live0000001').reportSentAt, null);
+  assert.equal(app.logs.length, 1);
+});
+
+test('the report uses Analytics peak and average when available', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const analyticsCalls = [];
+  const analytics = {
+    async getLivestreamTotals(args) {
+      analyticsCalls.push(args);
+      return { averageConcurrentViewers: 30, peakConcurrentViewers: 90 };
+    },
+  };
+  const app = await setup({ videos, analytics });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+
+  await app.tracker.sendReport(app.store.getEvent('live0000001'), new Date('2026-10-19T12:00:00Z'));
+
+  assert.equal(analyticsCalls[0].videoId, 'live0000001');
+  assert.equal(analyticsCalls[0].channelId, CHANNEL);
+  assert.match(app.sent[0].text, /Samanaikaisia katsojia \(enimmäismäärä\): 90/);
+  assert.match(app.sent[0].text, /Samanaikaisia katsojia \(keskiarvo\): 30/);
+});
+
+test('a failing Analytics call falls back to the sampled values and is logged', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const analytics = {
+    async getLivestreamTotals() {
+      throw new Error('quota');
+    },
+  };
+  const app = await setup({ videos, analytics });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+
+  await app.tracker.sendReport(app.store.getEvent('live0000001'), new Date('2026-10-19T12:00:00Z'));
+
+  assert.equal(app.sent.length, 1);
+  assert.match(app.sent[0].text, /enimmäismäärä\): 40/);
   assert.equal(app.logs.length, 1);
 });

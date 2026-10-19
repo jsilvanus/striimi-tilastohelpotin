@@ -10,6 +10,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
+    "oauth-setup": "node scripts/oauth-setup.js",
     "test": "node --test"
   },
   "license": "UNLICENSED"
