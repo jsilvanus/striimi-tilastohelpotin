@@ -76,16 +76,15 @@ test('normalizeVideo converts API strings to numbers and defaults', () => {
   const out = normalizeVideo({
     id: 'x',
     snippet: { channelId: CHANNEL, title: 'T', liveBroadcastContent: 'live' },
-    liveStreamingDetails: { concurrentViewers: '17', actualStartTime: '2026-10-18T10:00:00Z' },
+    liveStreamingDetails: { actualStartTime: '2026-10-18T10:00:00Z' },
     statistics: { viewCount: '99' },
   });
-  assert.equal(out.concurrentViewers, 17);
   assert.equal(out.viewCount, 99);
   assert.equal(out.actualEndTime, null);
   assert.equal(normalizeVideo({ id: 'y', snippet: { channelId: CHANNEL, title: 'U' } }).liveBroadcastContent, 'none');
 });
 
-test('a live stream is discovered once and sampled on every tick', async () => {
+test('a live stream is discovered once and its viewers are not sampled', async () => {
   const videos = new Map([['live0000001', makeVideo()]]);
   const app = await setup({ videos });
 
@@ -97,7 +96,7 @@ test('a live stream is discovered once and sampled on every tick', async () => {
   const event = app.store.getEvent('live0000001');
   assert.equal(event.source, 'youtube');
   assert.equal(event.countingScheme, null);
-  assert.deepEqual(event.samples.map((s) => s.viewers), [40, 55]);
+  assert.equal(event.samples, undefined);
   assert.equal(app.store.listEvents().length, 1);
 });
 
@@ -119,7 +118,7 @@ test('when a stream ends its end time is recorded and the report is sent once, a
 
   assert.equal(app.sent.length, 1);
   assert.equal(app.sent[0].to, 'tilasto@example.com');
-  assert.match(app.sent[0].text, /Samanaikaisia katsojia \(enimmäismäärä\): 40/);
+  assert.match(app.sent[0].text, /Samanaikaisia katsojia \(enimmäismäärä\): ei saatavilla/);
   assert.ok(app.store.getEvent('live0000001').reportSentAt);
 });
 
@@ -190,11 +189,13 @@ test('the report uses Analytics peak and average when available', async () => {
   assert.match(app.sent[0].text, /Samanaikaisia katsojia \(keskiarvo\): 30/);
 });
 
-test('a failing Analytics call falls back to the sampled values and is logged', async () => {
+test('a failing Analytics call leaves the live figures unavailable, is logged, and a resend fetches them', async () => {
   const videos = new Map([['live0000001', makeVideo()]]);
+  let failing = true;
   const analytics = {
     async getLivestreamTotals() {
-      throw new Error('quota');
+      if (failing) throw new Error('quota');
+      return { averageConcurrentViewers: 30, peakConcurrentViewers: 90 };
     },
   };
   const app = await setup({ videos, analytics });
@@ -206,8 +207,13 @@ test('a failing Analytics call falls back to the sampled values and is logged', 
   await app.tracker.sendReport(app.store.getEvent('live0000001'), new Date('2026-10-19T12:00:00Z'));
 
   assert.equal(app.sent.length, 1);
-  assert.match(app.sent[0].text, /enimmäismäärä\): 40/);
+  assert.match(app.sent[0].text, /enimmäismäärä\): ei saatavilla/);
   assert.equal(app.logs.length, 1);
+
+  failing = false;
+  await app.tracker.sendReport(app.store.getEvent('live0000001'), new Date('2026-10-20T12:00:00Z'), { resend: true });
+  assert.match(app.sent[1].text, /Samanaikaisia katsojia \(enimmäismäärä\): 90/);
+  assert.equal(app.store.getEvent('live0000001').reportSnapshot.live, 30);
 });
 
 test('recording views are counted from the view count at the end of the stream', async () => {

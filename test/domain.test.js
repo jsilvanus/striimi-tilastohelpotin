@@ -18,21 +18,11 @@ const base = { id: 'abc12345678', source: 'youtube', title: 'Jumalanpalvelus', e
 const settings = { ...DEFAULT_SETTINGS, liveModel: 'average_concurrent' };
 const submission = (groupName, watchers, contactEmail = null) => ({ id: groupName, groupName, watchers, contactEmail, createdAt: '2026-10-18T12:00:00Z' });
 
-test('live value uses the peak or the average of our samples', () => {
-  const event = createEvent({ ...base, samples: [{ viewers: 10 }, { viewers: 42 }, { viewers: 15 }] });
-  assert.equal(liveValue(event, 'max_concurrent'), 42);
-  assert.equal(liveValue(event, 'average_concurrent'), 22);
-  assert.equal(liveValue(createEvent({ ...base }), 'max_concurrent'), null);
-});
-
-test('Analytics values are preferred over samples', () => {
-  const event = createEvent({
-    ...base,
-    samples: [{ viewers: 10 }],
-    analytics: { peakConcurrentViewers: 90, averageConcurrentViewers: 30 },
-  });
+test('live value is the Analytics peak or average, and unknown without Analytics', () => {
+  const event = createEvent({ ...base, analytics: { peakConcurrentViewers: 90, averageConcurrentViewers: 30 } });
   assert.equal(liveValue(event, 'max_concurrent'), 90);
   assert.equal(liveValue(event, 'average_concurrent'), 30);
+  assert.equal(liveValue(createEvent({ ...base }), 'max_concurrent'), null);
 });
 
 test('each registered group replaces one live viewer, then group watchers and recording views are added', () => {
@@ -40,7 +30,7 @@ test('each registered group replaces one live viewer, then group watchers and re
     ...base,
     endsAt: '2026-10-18T12:00:00.000Z',
     countingScheme: 'max_concurrent',
-    samples: [{ viewers: 10 }, { viewers: 40 }, { viewers: 30 }],
+    analytics: { peakConcurrentViewers: 40, averageConcurrentViewers: 27 },
     youtube: { viewCount: 160 },
     viewCountAtEnd: 100,
     submissions: [submission('Nuoret', 12), submission('Vanhainkoti', 8)],
@@ -55,7 +45,7 @@ test('each registered group replaces one live viewer, then group watchers and re
 });
 
 test('the event model overrides the global default, and the global default applies otherwise', () => {
-  const event = createEvent({ ...base, samples: [{ viewers: 10 }, { viewers: 40 }] });
+  const event = createEvent({ ...base, analytics: { peakConcurrentViewers: 40, averageConcurrentViewers: 25 } });
   assert.equal(estimateParticipants(event, settings).model, 'average_concurrent');
   assert.equal(estimateParticipants({ ...event, countingScheme: 'max_concurrent' }, settings).live, 40);
 });
@@ -63,7 +53,7 @@ test('the event model overrides the global default, and the global default appli
 test('live viewers never go below zero when there are more groups than viewers', () => {
   const event = createEvent({
     ...base,
-    samples: [{ viewers: 1 }],
+    analytics: { peakConcurrentViewers: 1, averageConcurrentViewers: 1 },
     submissions: [submission('A', 3), submission('B', 4)],
   });
   assert.equal(estimateParticipants(event, settings).liveAfterGroups, 0);
@@ -106,7 +96,7 @@ test('buildReport lists the breakdown and leaves contact emails out of the email
   const event = createEvent({
     ...base,
     endsAt: '2026-10-18T12:00:00.000Z',
-    samples: [{ viewers: 25 }],
+    analytics: { peakConcurrentViewers: 25, averageConcurrentViewers: 20 },
     youtube: { viewCount: 300 },
     viewCountAtEnd: 200,
     countingScheme: 'max_concurrent',

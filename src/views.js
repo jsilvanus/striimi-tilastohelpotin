@@ -299,8 +299,6 @@ export function eventDetailsPage({ event, settings, report, flash = '', now }) {
   const est = event.reportSnapshot ?? estimateParticipants(event, settings);
   const purgeAt = formsPurgeAt(event);
   const due = reportAt(event);
-  const samples = event.samples;
-  const sampleValues = samples.map((sample) => sample.viewers);
   const forms = event.submissions.length
     ? `<table><thead><tr><th>Ilmoitettu</th><th>Ryhmä</th><th>Katsojia</th><th>Yhteystieto</th></tr></thead><tbody>${event.submissions
         .map(
@@ -341,9 +339,6 @@ ${purgeAt && !event.formsPurgedAt ? `<p class="meta">Lomakkeet poistetaan ${esc(
 <table><tbody>
 ${row('Samanaikaisten katsojien enimmäismäärä (Analytics)', event.analytics?.peakConcurrentViewers)}
 ${row('Samanaikaisten katsojien keskiarvo (Analytics)', event.analytics?.averageConcurrentViewers)}
-${row('Enimmäismäärä näytteistä', sampleValues.length ? Math.max(...sampleValues) : null)}
-${row('Keskiarvo näytteistä', sampleValues.length ? Math.round(sampleValues.reduce((a, b) => a + b, 0) / sampleValues.length) : null)}
-${row('Näytteitä', samples.length)}
 ${row('Katselukerrat nyt (viimeisin haku)', event.youtube?.viewCount)}
 ${row('Katselukerrat lähetyksen päättyessä', event.viewCountAtEnd)}
 ${row('Analytics haettu', event.analytics?.fetchedAt ? formatDateTime(event.analytics.fetchedAt) : null)}
@@ -368,13 +363,6 @@ ${
   sent
     ? ''
     : `<section><h2>Raportin esikatselu</h2><p class="meta">Aihe: ${esc(report.subject)}</p><pre class="card">${esc(report.text)}</pre></section>`
-}
-${
-  samples.length
-    ? `<section><details><summary>Katsojanäytteet (${samples.length})</summary><table><thead><tr><th>Aika</th><th>Katsojia</th></tr></thead><tbody>${samples
-        .map((sample) => `<tr><td>${esc(formatDateTime(sample.at))}</td><td>${esc(sample.viewers)}</td></tr>`)
-        .join('')}</tbody></table></details></section>`
-    : ''
 }`;
   return layout({ title: event.title, settings, body });
 }

@@ -9,7 +9,7 @@ ja lähettää tilaisuuden päätyttyä raporttipyynnön sähköpostitse (Brevo)
 
 - **Striimien ja videoiden seuranta.** Palvelu löytää seurakunnan kanavilta live- ja tulevat striimit
   automaattisesti. Julkaistut videot listataan ylläpitonäkymässä, josta ne voi ottaa seurantaan.
-- **YouTube-kyselyt harvoin.** Kanavaa ja seurattuja videoita kysytään enintään kerran tunnissa sekä vielä kerran juuri ennen raportin lähettämistä (tuoreet katselukerrat). Samanaikaisten katsojien luvut tulevat Analyticsistä; tunnin välein otetut näytteet ovat vain karkea varalla käytettävä arvio.
+- **YouTube-kyselyt harvoin.** Kanavaa ja seurattuja videoita kysytään enintään kerran tunnissa sekä vielä kerran juuri ennen raportin lähettämistä (tuoreet katselukerrat). Samanaikaisia katsojia ei seurata lainkaan itse: live-luvut (enimmäismäärä ja keskiarvo) haetaan vain YouTube Analyticsin keräämistä tiedoista raporttia lähetettäessä.
 - **Osallistujamäärä.** Yhteensä = live-katsojat + lomakeryhmien katsojat + tallenteen katselut.
   Live-katsojat voi laskea enimmäismäärästä tai keskiarvosta (oletus asetetaan ylläpidossa, yksittäinen
   tilaisuus voi ohittaa sen). Jokainen lomakeryhmä vähentää yhden live-katsojan, koska ryhmän näyttö
@@ -88,7 +88,7 @@ YouTube Analytics -rajapinnasta. Se vaatii kanavan omistajan tai ylläpitäjän 
    osoite ja hyväksy käyttöoikeus seurakunnan kanavan tilille.
 3. Tallenna tulostettu `YOUTUBE_OAUTH_REFRESH_TOKEN` palvelun ympäristömuuttujiin.
 
-Jos Analytics-haku epäonnistuu tai dataa ei vielä ole, raportti käyttää tilaisuuden aikana otettuja näytteitä.
+Jos Analytics-haku epäonnistuu tai dataa ei vielä ole, raportissa live-luvut ovat "ei saatavilla". Uudelleenlähetys yrittää hakua uudestaan ja päivittää luvut.
 
 Raportin vastaanottaja, lähettäjän sähköposti (vahvistettu Brevossa) ja sähköpostipohja asetetaan
 ylläpitonäkymän asetuksissa osoitteessa `/admin`.

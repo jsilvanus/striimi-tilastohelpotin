@@ -19,7 +19,6 @@ export function normalizeVideo(item) {
     scheduledStartTime: live.scheduledStartTime ?? null,
     actualStartTime: live.actualStartTime ?? null,
     actualEndTime: live.actualEndTime ?? null,
-    concurrentViewers: live.concurrentViewers == null ? null : Number(live.concurrentViewers),
     viewCount: item.statistics?.viewCount == null ? null : Number(item.statistics.viewCount),
   };
 }

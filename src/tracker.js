@@ -35,9 +35,6 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
 
   function applyVideo(event, video, ts) {
     event.youtube = youtubeState(video, ts);
-    if (video.liveBroadcastContent === 'live' && video.concurrentViewers !== null) {
-      event.samples.push({ at: ts.toISOString(), viewers: video.concurrentViewers });
-    }
     if (video.actualEndTime && !event.endsAt) event.endsAt = video.actualEndTime;
     // The recording's views are counted from the end of the stream, so keep the count at that point.
     if (event.endsAt && event.viewCountAtEnd == null && video.viewCount != null && Date.parse(event.endsAt) <= ts) {
@@ -55,7 +52,7 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
     }
   }
 
-  // Samples concurrent viewers and detects when streams end.
+  // Reads the state and view count of followed videos (detects when streams end). Live viewers are not sampled.
   async function refresh(ts, youtube) {
     const ids = store
       .listEvents()
@@ -69,7 +66,7 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
   }
 
   // Analytics data lags the stream slightly, so it is fetched when the report is due.
-  // If it is unavailable, the report falls back to the values sampled during the stream.
+  // If it is unavailable, the live figures are reported as not available and a resend can fetch them later.
   async function fetchAnalytics(event, ts) {
     const analytics = current(analyticsClient);
     if (!analytics || event.source !== 'youtube' || event.analytics) return;
@@ -83,7 +80,7 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
       });
       if (totals) event.analytics = { ...totals, fetchedAt: ts.toISOString() };
     } catch (err) {
-      log.error(`YouTube Analytics -haku epäonnistui (${event.id}), käytetään näytteitä: ${err.message}`);
+      log.error(`YouTube Analytics -haku epäonnistui (${event.id}), live-lukuja ei saatu: ${err.message}`);
     }
   }
 
@@ -108,10 +105,9 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
     if (!settings.reportRecipient || !settings.senderEmail) {
       throw new Error('Asetuksista puuttuu raportin vastaanottaja tai lähettäjän sähköposti.');
     }
-    if (!resend) {
-      await refreshViews(event, ts);
-      await fetchAnalytics(event, ts);
-    }
+    if (!resend) await refreshViews(event, ts);
+    // A resend tries Analytics again if the first attempt got nothing.
+    await fetchAnalytics(event, ts);
     const { subject, text } = buildReport(event, settings, config.publicBaseUrl);
     await mailer.send({
       sender: { name: settings.senderName || settings.senderEmail, email: settings.senderEmail },
@@ -122,6 +118,7 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
     if (resend) {
       // The retention period keeps running from the first send.
       event.reportResentAt = ts.toISOString();
+      if (!event.formsPurgedAt) event.reportSnapshot = estimateParticipants(event, settings);
     } else {
       event.reportSentAt = ts.toISOString();
       // The forms (and contact emails) are deleted after a week, so keep the figures that were reported.

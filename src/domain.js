@@ -65,7 +65,6 @@ export function createEvent(fields) {
     closedAt: null,
     analytics: null,
     enabled: true,
-    samples: [],
     youtube: null,
     submissions: [],
     reportSentAt: null,
@@ -122,23 +121,11 @@ export function eventStatus(event, now) {
   return 'Suljettu, raportti odottaa';
 }
 
-export function maxViewers(event) {
-  const values = event.samples.map((sample) => sample.viewers);
-  return values.length ? Math.max(...values) : null;
-}
-
-// Samples are taken at a fixed interval, so their mean approximates
-// combined watch time divided by the length of the stream.
-export function averageViewers(event) {
-  const values = event.samples.map((sample) => sample.viewers);
-  if (!values.length) return null;
-  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
-}
-
-// YouTube Analytics values (fetched at report time) are preferred over our own samples.
+// Live figures come only from YouTube Analytics (fetched at report time); we do not sample viewers ourselves.
 export function liveValue(event, model) {
-  if (model === 'max_concurrent') return event.analytics?.peakConcurrentViewers ?? maxViewers(event);
-  return event.analytics?.averageConcurrentViewers ?? averageViewers(event);
+  const value =
+    model === 'max_concurrent' ? event.analytics?.peakConcurrentViewers : event.analytics?.averageConcurrentViewers;
+  return value ?? null;
 }
 
 // Views accrued on the recording between the end of the stream and the storage boundary.
