@@ -1,0 +1,17 @@
+# Runs the published image. Put the settings in .env (see .env.example) and start with:
+#   docker compose up -d
+services:
+  app:
+    image: ghcr.io/jsilvanus/striimi-tilastohelpotin:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8095"
+    ports:
+      # Local loop only. Put a reverse proxy in front for public access (see compose.traefik.yml).
+      - "127.0.0.1:${HOST_PORT:-8095}:8095"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

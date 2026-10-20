@@ -1,0 +1,17 @@
+{
+  "name": "striimi-tilastohelpotin",
+  "version": "0.1.0",
+  "description": "Kirkon nettistriimien osallistujien tilastoinnin helpottaja",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "oauth-setup": "node scripts/oauth-setup.js",
+    "test": "node --test"
+  },
+  "license": "UNLICENSED"
+}
