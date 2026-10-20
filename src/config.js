@@ -17,6 +17,8 @@ export function loadConfig(env = process.env) {
       refreshToken: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? '',
     },
     pollIntervalSeconds: Number(env.POLL_INTERVAL_SECONDS ?? 60),
+    secretsKey: env.SECRETS_KEY ?? '',
+    secretsFile: env.SECRETS_FILE ?? 'data/secrets.enc.json',
     adminPassword: env.ADMIN_PASSWORD ?? '',
     brevoApiKey: env.BREVO_API_KEY ?? '',
     defaultSettings: {

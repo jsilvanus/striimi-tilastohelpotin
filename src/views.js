@@ -180,6 +180,7 @@ function settingsForm(settings) {
 export function adminPage({ events, settings, videos, videosError, flash = '', now }) {
   const tracked = new Set(events.map((event) => event.id));
   const body = `<h1>Ylläpito</h1>
+<p><a href="/admin/credentials">Tunnukset (YouTube, OAuth, Brevo)</a></p>
 ${flash ? `<p class="notice ok" role="status">${esc(flash)}</p>` : ''}
 <section>
 <h2>Uusi manuaalinen linkki</h2>
@@ -204,4 +205,74 @@ ${events.map((event) => eventCard(event, now, settings)).join('') || '<p class="
 ${settingsForm(settings)}
 </section>`;
   return layout({ title: 'Ylläpito', settings, body });
+}
+
+function sourceLabel(item) {
+  if (item.source === 'ui') return `Tallennettu täällä ${item.savedAt ? formatDateTime(item.savedAt) : ''}`.trim();
+  if (item.source === 'env') return 'Ympäristömuuttujasta (palvelimen asetus)';
+  return 'Ei asetettu';
+}
+
+function credentialCard({ title, help, item, action, fields, canStore, extra = '' }) {
+  const state = item.configured
+    ? `<span class="badge">${esc(sourceLabel(item))}${item.hint ? ` · ${esc(item.hint)}` : ''}</span>`
+    : '<span class="badge">Ei asetettu</span>';
+  const inputs = fields
+    .map(
+      (f) =>
+        `<label>${esc(f.label)} <input name="${f.name}" type="${f.secret ? 'password' : 'text'}" autocomplete="off" maxlength="300"${f.value ? ` value="${esc(f.value)}"` : ''}${item.configured && f.secret ? ' placeholder="Jätä tyhjäksi, jos et vaihda"' : ''}${item.configured || f.optional ? '' : ' required'}></label>`,
+    )
+    .join('');
+  const form = canStore
+    ? `<form method="post" action="/admin/credentials/${action}" class="stack">
+${inputs}
+<label>Muistiinpano <input name="note" maxlength="500" value="${esc(item.note)}" placeholder="Esim. kenen tunnuksilla ja milloin luotu"></label>
+<div class="actions"><button>Tallenna</button></div>
+</form>
+${item.source === 'ui' ? `<form method="post" action="/admin/credentials/${action}/delete"><button class="secondary">Poista tallennettu tunnus</button></form>` : ''}`
+    : '<p class="meta">Tallennus on pois käytöstä (SECRETS_KEY puuttuu).</p>';
+  return `<div class="card"><h3>${esc(title)} ${state}</h3><p class="meta">${esc(help)}</p>${extra}${form}</div>`;
+}
+
+export function credentialsPage({ status, canStore, redirectUri, channelIds = [], flash = '', settings }) {
+  if (!status) return errorPage('Tunnusten hallinta ei ole käytössä.');
+  const token = status.oauthToken;
+  const identity = token.meta ?? {};
+  const mismatch =
+    identity.channelId && channelIds.length && !channelIds.includes(identity.channelId)
+      ? `<p class="notice">Kirjautuneen kanavan tunnus ${esc(identity.channelId)} ei ole seurattavien kanavien listalla (YOUTUBE_CHANNEL_IDS). Analytics-haku ei toimi niiden kanavien videoille.</p>`
+      : '';
+  const who = token.configured
+    ? token.source === 'ui'
+      ? `<p>Kirjautunut: <strong>${esc(identity.channelTitle ?? 'kanava ei tiedossa')}</strong>${identity.email ? ` (${esc(identity.email)})` : ''}${identity.channelId ? `<br><span class="meta">Kanavan tunnus ${esc(identity.channelId)}</span>` : ''}</p>${mismatch}`
+      : '<p class="meta">Pysyvä tunnus tulee ympäristömuuttujasta; kirjautunutta tiliä ei voi näyttää ennen uutta kirjautumista tässä.</p>'
+    : '';
+  const signIn =
+    status.oauthClient.configured && canStore
+      ? `<p><a href="/admin/oauth/start"><button type="button" class="secondary">${token.configured ? 'Kirjaudu uudelleen Googleen' : 'Kirjaudu Googleen'}</button></a></p>`
+      : '<p class="meta">Tallenna ensin OAuth-asiakkaan tunnus ja salaisuus.</p>';
+  const tokenNote =
+    token.source === 'ui' && canStore
+      ? `<form method="post" action="/admin/credentials/oauth-token" class="stack"><label>Muistiinpano <input name="note" maxlength="500" value="${esc(token.note)}"></label><div class="actions"><button class="secondary">Tallenna muistiinpano</button></div></form><form method="post" action="/admin/credentials/oauth-token/delete"><button class="secondary">Poista kirjautuminen</button></form>`
+      : '';
+  const body = `<h1>Tunnukset</h1>
+<p><a href="/admin">← Ylläpitoon</a></p>
+${flash ? `<p class="notice ok" role="status">${esc(flash)}</p>` : ''}
+<p class="notice">${canStore ? 'Tunnukset tallennetaan salattuna (AES-256-GCM). Avain tulee palvelimen SECRETS_KEY-asetuksesta, eikä sitä tallenneta mihinkään. Tallennettu arvo ei näy enää tallennuksen jälkeen, vain sen loppu.' : 'Tallennus on pois käytöstä: aseta palvelimelle SECRETS_KEY (pitkä satunnainen merkkijono) ja käynnistä palvelu uudelleen. Siihen asti tunnukset luetaan ympäristömuuttujista.'} Täällä tallennettu tunnus voittaa ympäristömuuttujan.</p>
+<section>
+<h2>YouTube Data API</h2>
+${credentialCard({ title: 'API-avain', help: 'Videoiden ja suorien lähetysten seuranta.', item: status.youtubeApiKey, action: 'youtube-key', fields: [{ name: 'apiKey', label: 'API-avain', secret: true }], canStore })}
+</section>
+<section>
+<h2>YouTube Analytics (OAuth)</h2>
+${credentialCard({ title: 'OAuth-asiakas', help: `Luo Google Cloudissa OAuth-asiakas (verkkosovellus) ja lisää sallituksi uudelleenohjausosoitteeksi: ${redirectUri}`, item: status.oauthClient, action: 'oauth-client', fields: [{ name: 'clientId', label: 'Asiakastunnus', value: status.oauthClient.clientId }, { name: 'clientSecret', label: 'Asiakkaan salaisuus', secret: true }], canStore })}
+<div class="card"><h3>Kirjautuminen ${token.configured ? `<span class="badge">${esc(sourceLabel(token))}</span>` : '<span class="badge">Ei kirjautunut</span>'}</h3>
+<p class="meta">Kirjaudu kanavan omistajan tai ylläpitäjän Google-tilillä. Oikeudet: Analytics-lukuoikeus sekä kanavan ja sähköpostiosoitteen näyttäminen tällä sivulla.</p>
+${who}${signIn}${tokenNote}</div>
+</section>
+<section>
+<h2>Sähköposti</h2>
+${credentialCard({ title: 'Brevo-API-avain', help: 'Raporttien lähetys.', item: status.brevoApiKey, action: 'brevo', fields: [{ name: 'apiKey', label: 'API-avain', secret: true }], canStore })}
+</section>`;
+  return layout({ title: 'Tunnukset', settings, body });
 }

@@ -148,3 +148,104 @@ test('admin can create a manual link that needs an end time and an https address
   assert.equal(event.eventType, 'worship');
   assert.equal(event.endsAt, '2099-10-19T15:00:00.000Z');
 });
+
+// --- Credentials page ---
+
+async function credentialsApp({ withSecrets = true, fetchImpl } = {}) {
+  const { createSecretStore } = await import('../src/secrets.js');
+  const { createCredentials } = await import('../src/credentials.js');
+  const secrets = withSecrets ? await createSecretStore({ file: null, key: 'k' }) : null;
+  const config = {
+    adminPassword: ADMIN_PASSWORD,
+    publicBaseUrl: 'http://app.test',
+    youtubeChannelIds: ['UCmatch'],
+    oauth: {},
+  };
+  const credentials = createCredentials({ config, secrets });
+  const credStore = await createStore({ defaults: DEFAULT_SETTINGS });
+  const tracker = createTracker({ config, store: credStore, youtube: null, mailer: null });
+  const app = createServer(createApp({ config, store: credStore, tracker, credentials, secrets, fetchImpl }));
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${app.address().port}`;
+  const call = (path, body) =>
+    fetch(`${url}${path}`, {
+      method: body ? 'POST' : 'GET',
+      redirect: 'manual',
+      headers: { authorization: auth, 'content-type': 'application/x-www-form-urlencoded' },
+      body: body ? new URLSearchParams(body) : undefined,
+    });
+  return { app, call, secrets };
+}
+
+test('the credentials page needs the admin login', async () => {
+  const { app } = await credentialsApp();
+  const res = await fetch(`http://127.0.0.1:${app.address().port}/admin/credentials`);
+  assert.equal(res.status, 401);
+  app.close();
+});
+
+test('a saved API key is shown only as its tail, with the note', async () => {
+  const { app, call, secrets } = await credentialsApp();
+  const res = await call('/admin/credentials/youtube-key', { apiKey: 'AIza-hyvin-salainen-1234', note: 'Seurakunnan projekti' });
+  assert.equal(res.status, 303);
+  assert.equal(secrets.get('youtubeApiKey').fields.apiKey, 'AIza-hyvin-salainen-1234');
+
+  const html = await (await call('/admin/credentials')).text();
+  assert.match(html, /••••1234/);
+  assert.match(html, /Seurakunnan projekti/);
+  assert.doesNotMatch(html, /hyvin-salainen/);
+
+  // Editing only the note keeps the key.
+  await call('/admin/credentials/youtube-key', { apiKey: '', note: 'Uusi muistio' });
+  assert.equal(secrets.get('youtubeApiKey').fields.apiKey, 'AIza-hyvin-salainen-1234');
+  assert.equal(secrets.get('youtubeApiKey').note, 'Uusi muistio');
+
+  await call('/admin/credentials/youtube-key/delete', {});
+  assert.equal(secrets.get('youtubeApiKey'), null);
+  app.close();
+});
+
+test('without SECRETS_KEY saving is refused', async () => {
+  const { app, call } = await credentialsApp({ withSecrets: false });
+  assert.equal((await call('/admin/credentials/brevo', { apiKey: 'x' })).status, 503);
+  assert.match(await (await call('/admin/credentials')).text(), /SECRETS_KEY/);
+  app.close();
+});
+
+test('the Google sign-in stores the token and shows who signed in', async () => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
+    const href = String(url);
+    requests.push(href);
+    const json = (data) => new Response(JSON.stringify(data), { status: 200 });
+    if (href.includes('oauth2.googleapis.com/token')) return json({ access_token: 'at', refresh_token: 'RT-secret-9999', expires_in: 3600 });
+    if (href.includes('/youtube/v3/channels')) return json({ items: [{ id: 'UCother', snippet: { title: 'Testikanava' } }] });
+    if (href.includes('userinfo')) return json({ email: 'admin@example.org' });
+    throw new Error(`unexpected ${href}`);
+  };
+  const { app, call, secrets } = await credentialsApp({ fetchImpl });
+  await call('/admin/credentials/oauth-client', { clientId: 'cid', clientSecret: 'csecret' });
+
+  const start = await call('/admin/oauth/start');
+  assert.equal(start.status, 303);
+  const consent = new URL(start.headers.get('location'));
+  assert.equal(consent.searchParams.get('redirect_uri'), 'http://app.test/admin/oauth/callback');
+  const state = consent.searchParams.get('state');
+
+  const bad = await call('/admin/oauth/callback?code=c&state=wrong');
+  assert.equal(bad.status, 400);
+
+  const done = await call(`/admin/oauth/callback?code=c&state=${state}`);
+  assert.equal(done.status, 303);
+  assert.equal(secrets.get('oauthToken').fields.refreshToken, 'RT-secret-9999');
+
+  const html = await (await call('/admin/credentials')).text();
+  assert.match(html, /Testikanava/);
+  assert.match(html, /admin@example\.org/);
+  assert.match(html, /ei ole seurattavien kanavien listalla/);
+  assert.doesNotMatch(html, /RT-secret/);
+
+  // The state is single-use.
+  assert.equal((await call(`/admin/oauth/callback?code=c&state=${state}`)).status, 400);
+  app.close();
+});

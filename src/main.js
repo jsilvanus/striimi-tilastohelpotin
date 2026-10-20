@@ -1,13 +1,11 @@
 import { createServer } from 'node:http';
-import { createAnalyticsClient } from './analytics.js';
-import { createMailer } from './brevo.js';
+import { createCredentials } from './credentials.js';
 import { loadConfig } from './config.js';
 import { DEFAULT_SETTINGS } from './domain.js';
 import { createApp } from './server.js';
+import { createSecretStore } from './secrets.js';
 import { createStore } from './store.js';
-import { createTokenProvider } from './oauth.js';
 import { createTracker } from './tracker.js';
-import { createYouTubeClient } from './youtube.js';
 
 const config = loadConfig();
 
@@ -15,18 +13,21 @@ const store = await createStore({
   file: config.dataFile,
   defaults: { ...DEFAULT_SETTINGS, ...config.defaultSettings },
 });
-const youtube = config.youtubeApiKey ? createYouTubeClient({ apiKey: config.youtubeApiKey }) : null;
-const mailer = config.brevoApiKey ? createMailer({ apiKey: config.brevoApiKey }) : null;
-const { clientId, clientSecret, refreshToken } = config.oauth;
-const analytics =
-  clientId && clientSecret && refreshToken
-    ? createAnalyticsClient({ tokenProvider: createTokenProvider({ clientId, clientSecret, refreshToken }) })
-    : null;
-const tracker = createTracker({ config, store, youtube, analytics, mailer });
+// Credentials saved in the admin view are encrypted with SECRETS_KEY; without it only env variables are used.
+const secrets = config.secretsKey ? await createSecretStore({ file: config.secretsFile, key: config.secretsKey }) : null;
+const credentials = createCredentials({ config, secrets });
+const youtube = () => credentials.youtube();
+const tracker = createTracker({
+  config,
+  store,
+  youtube,
+  analytics: () => credentials.analytics(),
+  mailer: () => credentials.mailer(),
+});
 
 tracker.start(config.pollIntervalSeconds * 1000);
 
-const server = createServer(createApp({ config, store, tracker, youtube }));
+const server = createServer(createApp({ config, store, tracker, youtube, credentials, secrets }));
 server.listen(config.port, () => {
   console.log(`Tilastopalvelu käynnissä portissa ${config.port}`);
 });

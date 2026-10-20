@@ -2,7 +2,11 @@ import { buildReport, createEvent, reportAt } from './domain.js';
 
 const MISSING_VIDEO_TTL_MS = 10 * 60_000;
 
-export function createTracker({ config, store, youtube = null, analytics = null, mailer = null, now = () => new Date(), log = console }) {
+// youtube, analytics and mailer may be clients or functions returning one (or null), so that
+// credentials saved in the admin view apply without a restart.
+const current = (client) => (typeof client === 'function' ? client() : client);
+
+export function createTracker({ config, store, youtube: youtubeClient = null, analytics: analyticsClient = null, mailer: mailerClient = null, now = () => new Date(), log = console }) {
   const missingVideos = new Map();
   let running = false;
   let timer = null;
@@ -41,7 +45,7 @@ export function createTracker({ config, store, youtube = null, analytics = null,
   }
 
   // Finds new live and upcoming streams on the configured channels.
-  async function discover(ts) {
+  async function discover(ts, youtube) {
     for (const channelId of config.youtubeChannelIds) {
       for (const video of await youtube.getChannelUploads(channelId)) {
         if (video.liveBroadcastContent === 'none' || store.getEvent(video.id)) continue;
@@ -51,7 +55,7 @@ export function createTracker({ config, store, youtube = null, analytics = null,
   }
 
   // Samples concurrent viewers and detects when streams end.
-  async function refresh(ts) {
+  async function refresh(ts, youtube) {
     const ids = store
       .listEvents()
       .filter((event) => event.source === 'youtube' && event.enabled && !event.reportSentAt)
@@ -66,6 +70,7 @@ export function createTracker({ config, store, youtube = null, analytics = null,
   // Analytics data lags the stream slightly, so it is fetched when the report is due.
   // If it is unavailable, the report falls back to the values sampled during the stream.
   async function fetchAnalytics(event, ts) {
+    const analytics = current(analyticsClient);
     if (!analytics || event.source !== 'youtube' || event.analytics) return;
     const startDate = (event.startsAt ?? event.createdAt).slice(0, 10);
     try {
@@ -83,6 +88,7 @@ export function createTracker({ config, store, youtube = null, analytics = null,
 
   async function sendReport(event, ts = now()) {
     if (event.reportSentAt) throw new Error('Raportti on jo lähetetty.');
+    const mailer = current(mailerClient);
     if (!mailer) throw new Error('Sähköpostia ei voi lähettää: BREVO_API_KEY puuttuu.');
     const settings = store.getSettings();
     if (!settings.reportRecipient || !settings.senderEmail) {
@@ -120,10 +126,11 @@ export function createTracker({ config, store, youtube = null, analytics = null,
     running = true;
     try {
       const ts = now();
+      const youtube = current(youtubeClient);
       if (youtube) {
         try {
-          await discover(ts);
-          await refresh(ts);
+          await discover(ts, youtube);
+          await refresh(ts, youtube);
         } catch (err) {
           log.error(`YouTube-päivitys epäonnistui: ${err.message}`);
         }
@@ -138,6 +145,7 @@ export function createTracker({ config, store, youtube = null, analytics = null,
   async function resolveVideo(videoId) {
     const existing = store.getEvent(videoId);
     if (existing) return existing;
+    const youtube = current(youtubeClient);
     if (!youtube) return null;
 
     const missingAt = missingVideos.get(videoId);

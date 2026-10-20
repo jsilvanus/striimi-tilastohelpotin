@@ -54,11 +54,25 @@ npm start
 | `YOUTUBE_OAUTH_CLIENT_ID` | OAuth-asiakkaan tunnus. Tarvitaan YouTube Analytics -tietoihin |
 | `YOUTUBE_OAUTH_CLIENT_SECRET` | OAuth-asiakkaan salaisuus |
 | `YOUTUBE_OAUTH_REFRESH_TOKEN` | Pitkäikäinen tunnus, jonka saat komennolla `npm run oauth-setup` |
+| `SECRETS_KEY` | Pitkä satunnainen merkkijono, jolla ylläpidossa tallennetut tunnukset salataan (AES-256-GCM). Ilman sitä tunnuksia ei voi tallentaa ylläpidossa. Älä tallenna sitä data-hakemistoon; jos se katoaa, tunnukset on syötettävä uudelleen |
+| `SECRETS_FILE` | Salattujen tunnusten tiedosto (oletus `data/secrets.enc.json`) |
 | `POLL_INTERVAL_SECONDS` | Seurantakierroksen väli (oletus 60) |
 | `ADMIN_PASSWORD` | Ylläpitonäkymän salasana (Basic-autentikointi, käyttäjänimi mikä tahansa). Ilman sitä ylläpito on pois käytöstä |
 | `BREVO_API_KEY` | Brevo-API-avain raporttien lähettämiseen |
 | `PARISH_NAME` | Seurakunnan nimi (oletusasetus, muutettavissa ylläpidossa) |
 | `PARISH_LOGO_URL` | Seurakunnan logon https-osoite (oletusasetus) |
+
+### Tunnukset ylläpidossa
+
+Sivulla `/admin/credentials` voi tallentaa YouTube Data API -avaimen, OAuth-asiakkaan, Google-kirjautumisen ja
+Brevo-avaimen muistiinpanoineen. Tallennettu arvo ei näy enää tallennuksen jälkeen, vain sen neljä viimeistä
+merkkiä. Tiedosto on salattu (AES-256-GCM, avain johdetaan `SECRETS_KEY`-arvosta scryptillä) ja sen oikeudet ovat 0600.
+Täällä tallennettu tunnus voittaa saman ympäristömuuttujan, ja muutos tulee voimaan ilman uudelleenkäynnistystä.
+Google-kirjautuminen tehdään sivulla (`Kirjaudu Googleen`); sivu näyttää, minkä kanavan ja tilin tunnuksella
+kirjauduttiin. Lisää OAuth-asiakkaan sallituksi uudelleenohjausosoitteeksi `PUBLIC_BASE_URL` + `/admin/oauth/callback`.
+Kirjautuminen pyytää Analytics-lukuoikeuden lisäksi kanavan ja sähköpostin näyttämisen. Ylläpidon salasana
+(`ADMIN_PASSWORD`) ja `SECRETS_KEY` ovat ainoat, jotka pysyvät palvelimen ympäristössä.
+Ei ole testattu oikeaa Googlea tai Brevoa vasten.
 
 ### YouTube Analytics (OAuth)
 

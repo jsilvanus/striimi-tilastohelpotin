@@ -1,5 +1,12 @@
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 export const ANALYTICS_SCOPE = 'https://www.googleapis.com/auth/yt-analytics.readonly';
+// Analytics for the numbers; youtube.readonly and email only to show which channel and account signed in.
+export const SCOPES = [
+  ANALYTICS_SCOPE,
+  'https://www.googleapis.com/auth/youtube.readonly',
+  'openid',
+  'email',
+].join(' ');
 
 async function postToken(fetchImpl, params) {
   const res = await fetchImpl(TOKEN_URL, {
@@ -14,16 +21,18 @@ async function postToken(fetchImpl, params) {
   return res.json();
 }
 
-export function buildConsentUrl({ clientId, redirectUri, scope = ANALYTICS_SCOPE }) {
+export function buildConsentUrl({ clientId, redirectUri, scope = SCOPES, state }) {
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  url.search = new URLSearchParams({
+  const params = {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
     scope,
     access_type: 'offline',
     prompt: 'consent',
-  }).toString();
+  };
+  if (state) params.state = state;
+  url.search = new URLSearchParams(params).toString();
   return url.toString();
 }
 
@@ -53,4 +62,27 @@ export function createTokenProvider({ clientId, clientSecret, refreshToken, fetc
       return cached.token;
     },
   };
+}
+
+// Which channel and Google account the token belongs to, for the admin page. Failures are not fatal.
+export async function fetchIdentity({ accessToken, fetchImpl = fetch }) {
+  const headers = { authorization: `Bearer ${accessToken}` };
+  const identity = { channelId: null, channelTitle: null, email: null };
+  try {
+    const res = await fetchImpl('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', { headers });
+    if (res.ok) {
+      const channel = (await res.json()).items?.[0];
+      identity.channelId = channel?.id ?? null;
+      identity.channelTitle = channel?.snippet?.title ?? null;
+    }
+  } catch {
+    // The token is still valid without it.
+  }
+  try {
+    const res = await fetchImpl('https://openidconnect.googleapis.com/v1/userinfo', { headers });
+    if (res.ok) identity.email = (await res.json()).email ?? null;
+  } catch {
+    // Same here.
+  }
+  return identity;
 }

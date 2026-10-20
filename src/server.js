@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { buildConsentUrl, exchangeCode, fetchIdentity } from './oauth.js';
 import { COUNTING_SCHEMES, EVENT_TYPES, MAX_VOD_DAYS, createEvent, fromLocalInput, isFormOpen } from './domain.js';
 import * as views from './views.js';
 
@@ -144,7 +145,8 @@ function assertSameOrigin(req) {
   if (host !== req.headers.host) throw new HttpError(403, 'Pyyntö estettiin.');
 }
 
-export function createApp({ config, store, tracker, youtube = null }) {
+export function createApp({ config, store, tracker, youtube: youtubeClient = null, credentials = null, secrets = null, fetchImpl = fetch }) {
+  const currentYouTube = () => (typeof youtubeClient === 'function' ? youtubeClient() : youtubeClient);
   function isAuthorized(req) {
     const header = req.headers.authorization ?? '';
     if (!header.startsWith('Basic ')) return false;
@@ -191,7 +193,8 @@ export function createApp({ config, store, tracker, youtube = null }) {
   }
 
   async function listChannelVideos() {
-    if (!youtube) return { videos: [], error: 'YouTube-avain puuttuu (YOUTUBE_API_KEY).' };
+    const youtube = currentYouTube();
+    if (!youtube) return { videos: [], error: 'YouTube-avain puuttuu. Tallenna se kohdassa Tunnukset.' };
     try {
       const lists = await Promise.all(config.youtubeChannelIds.map((id) => youtube.getChannelUploads(id)));
       return { videos: lists.flat(), error: null };
@@ -302,6 +305,116 @@ export function createApp({ config, store, tracker, youtube = null }) {
     back(res, 'Tallennettu.');
   }
 
+  // --- Credentials saved in the admin view (encrypted at rest, see secrets.js) ---
+
+  const oauthStates = new Map();
+  const STATE_TTL_MS = 10 * 60_000;
+  const redirectUri = `${config.publicBaseUrl}/admin/oauth/callback`;
+
+  function requireSecrets() {
+    if (!secrets || !credentials) {
+      throw new HttpError(503, 'Tunnusten tallennus ei ole käytössä: aseta SECRETS_KEY ja käynnistä palvelu uudelleen.');
+    }
+  }
+
+  function showCredentials(res, url) {
+    send(
+      res,
+      200,
+      views.credentialsPage({
+        status: credentials ? credentials.status() : null,
+        canStore: Boolean(secrets),
+        redirectUri,
+        channelIds: config.youtubeChannelIds,
+        flash: url.searchParams.get('msg') ?? '',
+        settings: store.getSettings(),
+      }),
+    );
+  }
+
+  const toCredentials = (res, message) => redirect(res, `/admin/credentials?msg=${encodeURIComponent(message)}`);
+
+  // An empty secret field keeps the stored secret, so the note can be edited alone.
+  async function saveCredential(res, name, form) {
+    requireSecrets();
+    const existing = secrets.get(name);
+    const note = text(form, 'note').slice(0, 500);
+    const pick = (field) => text(form, field) || existing?.fields?.[field] || '';
+    let fields;
+    if (name === 'oauthClient') {
+      fields = { clientId: pick('clientId'), clientSecret: pick('clientSecret') };
+      if (!fields.clientId || !fields.clientSecret) throw new HttpError(400, 'Asiakastunnus ja salaisuus vaaditaan.');
+    } else {
+      fields = { apiKey: pick('apiKey') };
+      if (!fields.apiKey) throw new HttpError(400, 'Avain puuttuu.');
+    }
+    await secrets.set(name, { fields, note, meta: existing?.meta ?? {} });
+    toCredentials(res, 'Tunnus tallennettu.');
+  }
+
+  async function startOAuth(res) {
+    requireSecrets();
+    const { clientId } = credentials.values('oauthClient').fields;
+    if (!clientId) throw new HttpError(400, 'Tallenna ensin OAuth-asiakkaan tunnus ja salaisuus.');
+    const now = Date.now();
+    for (const [key, at] of oauthStates) if (now - at > STATE_TTL_MS) oauthStates.delete(key);
+    const state = randomBytes(18).toString('base64url');
+    oauthStates.set(state, now);
+    redirect(res, buildConsentUrl({ clientId, redirectUri, state }));
+  }
+
+  async function finishOAuth(res, url) {
+    requireSecrets();
+    const state = url.searchParams.get('state') ?? '';
+    const startedAt = oauthStates.get(state);
+    oauthStates.delete(state);
+    if (!startedAt || Date.now() - startedAt > STATE_TTL_MS) {
+      throw new HttpError(400, 'Kirjautuminen vanheni tai pyyntö on virheellinen. Aloita alusta.');
+    }
+    const code = url.searchParams.get('code');
+    if (!code) return toCredentials(res, `Google ei myöntänyt oikeutta: ${url.searchParams.get('error') ?? 'koodi puuttuu'}`);
+    const { clientId, clientSecret } = credentials.values('oauthClient').fields;
+    try {
+      const tokens = await exchangeCode({ clientId, clientSecret, redirectUri, code, fetchImpl });
+      if (!tokens.refresh_token) {
+        throw new Error('Google ei palauttanut pysyvää tunnusta. Poista sovelluksen käyttöoikeus Google-tililtäsi ja yritä uudelleen.');
+      }
+      const identity = await fetchIdentity({ accessToken: tokens.access_token, fetchImpl });
+      await secrets.set('oauthToken', {
+        fields: { refreshToken: tokens.refresh_token },
+        note: secrets.get('oauthToken')?.note ?? '',
+        meta: identity,
+      });
+      toCredentials(res, 'YouTube-kirjautuminen tallennettu.');
+    } catch (err) {
+      toCredentials(res, `Kirjautuminen epäonnistui: ${err.message}`);
+    }
+  }
+
+  async function adminCredentials(req, res, url, form) {
+    if (req.method === 'GET' && url.pathname === '/admin/credentials') return showCredentials(res, url);
+    if (req.method === 'GET' && url.pathname === '/admin/oauth/start') return startOAuth(res);
+    if (req.method === 'GET' && url.pathname === '/admin/oauth/callback') return finishOAuth(res, url);
+    const names = { 'youtube-key': 'youtubeApiKey', 'oauth-client': 'oauthClient', brevo: 'brevoApiKey', 'oauth-token': 'oauthToken' };
+    const match = url.pathname.match(/^\/admin\/credentials\/([a-z-]+)(\/delete)?$/);
+    const name = match && names[match[1]];
+    if (!name || req.method !== 'POST') throw new HttpError(404, 'Sivua ei löydy.');
+    if (match[2]) {
+      requireSecrets();
+      await secrets.remove(name);
+      return toCredentials(res, 'Tunnus poistettu.');
+    }
+    if (name === 'oauthToken') {
+      // Only the note of the sign-in can be edited; the token itself comes from the sign-in flow.
+      requireSecrets();
+      const existing = secrets.get('oauthToken');
+      if (!existing) throw new HttpError(404, 'Kirjautumista ei ole.');
+      await secrets.set('oauthToken', { fields: existing.fields, note: text(form, 'note').slice(0, 500), meta: existing.meta }, existing.savedAt);
+      return toCredentials(res, 'Muistiinpano tallennettu.');
+    }
+    return saveCredential(res, name, form);
+  }
+
   async function admin(req, res, url) {
     if (!config.adminPassword) throw new HttpError(503, 'Ylläpito ei ole käytössä: ADMIN_PASSWORD puuttuu.');
     if (!isAuthorized(req)) {
@@ -311,6 +424,14 @@ export function createApp({ config, store, tracker, youtube = null }) {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/admin') return showAdmin(res, url);
+    if (url.pathname === '/admin/credentials' || url.pathname.startsWith('/admin/credentials/') || url.pathname.startsWith('/admin/oauth/')) {
+      let form = null;
+      if (req.method === 'POST') {
+        assertSameOrigin(req);
+        form = await readForm(req);
+      }
+      return adminCredentials(req, res, url, form);
+    }
     if (req.method !== 'POST') throw new HttpError(405, 'Virheellinen pyyntö.');
 
     assertSameOrigin(req);

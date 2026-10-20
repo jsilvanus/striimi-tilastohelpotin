@@ -65,5 +65,12 @@ test('the token provider caches the access token until it nearly expires', async
 test('the consent URL requests offline access for the analytics scope', () => {
   const url = new URL(buildConsentUrl({ clientId: 'id', redirectUri: 'http://localhost:8787/oauth2callback' }));
   assert.equal(url.searchParams.get('access_type'), 'offline');
-  assert.equal(url.searchParams.get('scope'), 'https://www.googleapis.com/auth/yt-analytics.readonly');
+  const scopes = url.searchParams.get('scope').split(' ');
+  assert.ok(scopes.includes('https://www.googleapis.com/auth/yt-analytics.readonly'));
+  assert.ok(scopes.includes('https://www.googleapis.com/auth/youtube.readonly'));
+});
+
+test('the consent URL carries the state when given', () => {
+  const url = new URL(buildConsentUrl({ clientId: 'id', redirectUri: 'http://x/cb', state: 'abc' }));
+  assert.equal(url.searchParams.get('state'), 'abc');
 });
