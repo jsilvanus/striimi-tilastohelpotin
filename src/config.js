@@ -16,7 +16,8 @@ export function loadConfig(env = process.env) {
       clientSecret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? '',
       refreshToken: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? '',
     },
-    pollIntervalSeconds: Number(env.POLL_INTERVAL_SECONDS ?? 60),
+    // YouTube is asked at most once an hour, whatever is configured.
+    pollIntervalSeconds: Math.max(3600, Number(env.POLL_INTERVAL_SECONDS ?? 3600) || 3600),
     secretsKey: env.SECRETS_KEY ?? '',
     secretsFile: env.SECRETS_FILE ?? 'data/secrets.enc.json',
     adminPassword: env.ADMIN_PASSWORD ?? '',

@@ -9,6 +9,7 @@ const current = (client) => (typeof client === 'function' ? client() : client);
 export function createTracker({ config, store, youtube: youtubeClient = null, analytics: analyticsClient = null, mailer: mailerClient = null, now = () => new Date(), log = console }) {
   const missingVideos = new Map();
   let running = false;
+  let lastYoutubeAt = null;
   let timer = null;
 
   function youtubeState(video, ts) {
@@ -86,15 +87,31 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
     }
   }
 
-  async function sendReport(event, ts = now()) {
-    if (event.reportSentAt) throw new Error('Raportti on jo lähetetty.');
+  // The view count is read once more just before a report so that it is as fresh as possible.
+  async function refreshViews(event, ts) {
+    const youtube = current(youtubeClient);
+    if (!youtube || event.source !== 'youtube') return;
+    try {
+      const [video] = await youtube.getVideos([event.id]);
+      if (video) applyVideo(event, video, ts);
+    } catch (err) {
+      log.error(`Katselukertojen haku ennen raporttia epäonnistui (${event.id}): ${err.message}`);
+    }
+  }
+
+  async function sendReport(event, ts = now(), { resend = false } = {}) {
+    if (event.reportSentAt && !resend) throw new Error('Raportti on jo lähetetty.');
+    if (resend && !event.reportSentAt) throw new Error('Raporttia ei ole vielä lähetetty.');
     const mailer = current(mailerClient);
     if (!mailer) throw new Error('Sähköpostia ei voi lähettää: BREVO_API_KEY puuttuu.');
     const settings = store.getSettings();
     if (!settings.reportRecipient || !settings.senderEmail) {
       throw new Error('Asetuksista puuttuu raportin vastaanottaja tai lähettäjän sähköposti.');
     }
-    await fetchAnalytics(event, ts);
+    if (!resend) {
+      await refreshViews(event, ts);
+      await fetchAnalytics(event, ts);
+    }
     const { subject, text } = buildReport(event, settings, config.publicBaseUrl);
     await mailer.send({
       sender: { name: settings.senderName || settings.senderEmail, email: settings.senderEmail },
@@ -102,11 +119,14 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
       subject,
       text,
     });
-    event.reportSentAt = ts.toISOString();
-    // The forms are deleted after a week, so keep the figures that were reported.
-    event.reportSnapshot = estimateParticipants(event, settings);
-    // Contact details are only needed to reach the group; drop them once the report has gone out.
-    for (const submission of event.submissions) submission.contactEmail = null;
+    if (resend) {
+      // The retention period keeps running from the first send.
+      event.reportResentAt = ts.toISOString();
+    } else {
+      event.reportSentAt = ts.toISOString();
+      // The forms (and contact emails) are deleted after a week, so keep the figures that were reported.
+      event.reportSnapshot = estimateParticipants(event, settings);
+    }
     await store.save();
   }
 
@@ -142,7 +162,10 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
     try {
       const ts = now();
       const youtube = current(youtubeClient);
-      if (youtube) {
+      // YouTube is asked at most once per interval (an hour in production), not on every local tick.
+      const youtubeDue = lastYoutubeAt === null || ts.getTime() - lastYoutubeAt >= (config.pollIntervalSeconds ?? 0) * 1000;
+      if (youtube && youtubeDue) {
+        lastYoutubeAt = ts.getTime();
         try {
           await discover(ts, youtube);
           await refresh(ts, youtube);

@@ -82,7 +82,7 @@ Varmuuskopioi volume `data` ja `.env`:
 docker run --rm -v striimi-tilastohelpotin_data:/data -v "$PWD":/backup alpine tar czf /backup/data.tgz -C /data .
 ```
 
-Lomakkeet poistuvat automaattisesti viikon kuluttua raportin lähettämisestä, joten vanhaa varmuuskopiota ei kannata palauttaa
+Lomakkeet ja niiden yhteystiedot poistuvat automaattisesti viikon kuluttua raportin lähettämisestä, joten vanhaa varmuuskopiota ei kannata palauttaa
 ilman tarvetta.
 
 ## Ei vielä kokeiltu

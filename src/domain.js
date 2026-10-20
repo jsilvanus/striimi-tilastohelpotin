@@ -70,6 +70,7 @@ export function createEvent(fields) {
     submissions: [],
     reportSentAt: null,
     reportSnapshot: null,
+    reportResentAt: null,
     formsPurgedAt: null,
     ...fields,
   };
@@ -181,7 +182,8 @@ export function youtubeCountLines(event) {
 }
 
 export function buildReport(event, settings, publicBaseUrl) {
-  const est = estimateParticipants(event, settings);
+  // Once the forms are deleted the figures reported earlier are the only ones that remain.
+  const est = event.formsPurgedAt && event.reportSnapshot ? event.reportSnapshot : estimateParticipants(event, settings);
   const values = {
     'EVENT NAME': event.title,
     'EVENT URL': `${publicBaseUrl}/e/${event.id}`,
@@ -194,7 +196,9 @@ export function buildReport(event, settings, publicBaseUrl) {
       `Tallenteen katselut (${vodDaysOf(event)} vrk päättymisestä): ${orUnavailable(est.vod)}`,
       est.total === null ? 'Osallistujia ei voitu arvioida.' : `Osallistujat yhteensä: ${est.total}`,
     ].join('\n'),
-    'FILLED FORMS': event.submissions.length
+    'FILLED FORMS': event.formsPurgedAt
+      ? 'Lomakkeet on poistettu viikon kuluttua ensimmäisestä raportista.'
+      : event.submissions.length
       ? event.submissions.map((submission) => `- ${submission.groupName}: ${submission.watchers}`).join('\n')
       : 'Ei lomakkeita.',
     'YOUTUBE COUNTS': youtubeCountLines(event),

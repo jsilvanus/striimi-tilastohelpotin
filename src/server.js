@@ -301,10 +301,10 @@ export function createApp({ config, store, tracker, youtube: youtubeClient = nul
       back(res, 'Linkki suljettu.');
       return;
     }
-    if (action === 'report') {
+    if (action === 'report' || action === 'resend') {
       try {
-        await tracker.sendReport(event);
-        back(res, 'Raportti lähetetty.');
+        await tracker.sendReport(event, undefined, { resend: action === 'resend' });
+        back(res, action === 'resend' ? 'Raportti lähetetty uudelleen.' : 'Raportti lähetetty.');
       } catch (err) {
         back(res, err.message);
       }

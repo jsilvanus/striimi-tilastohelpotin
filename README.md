@@ -9,7 +9,7 @@ ja lähettää tilaisuuden päätyttyä raporttipyynnön sähköpostitse (Brevo)
 
 - **Striimien ja videoiden seuranta.** Palvelu löytää seurakunnan kanavilta live- ja tulevat striimit
   automaattisesti. Julkaistut videot listataan ylläpitonäkymässä, josta ne voi ottaa seurantaan.
-- **Samanaikaisten katsojien näytteenotto.** Käynnissä olevasta striimistä otetaan näyte minuutin välein.
+- **YouTube-kyselyt harvoin.** Kanavaa ja seurattuja videoita kysytään enintään kerran tunnissa sekä vielä kerran juuri ennen raportin lähettämistä (tuoreet katselukerrat). Samanaikaisten katsojien luvut tulevat Analyticsistä; tunnin välein otetut näytteet ovat vain karkea varalla käytettävä arvio.
 - **Osallistujamäärä.** Yhteensä = live-katsojat + lomakeryhmien katsojat + tallenteen katselut.
   Live-katsojat voi laskea enimmäismäärästä tai keskiarvosta (oletus asetetaan ylläpidossa, yksittäinen
   tilaisuus voi ohittaa sen). Jokainen lomakeryhmä vähentää yhden live-katsojan, koska ryhmän näyttö
@@ -29,8 +29,8 @@ ja lähettää tilaisuuden päätyttyä raporttipyynnön sähköpostitse (Brevo)
 ## Tietosuoja
 
 - Lomakkeelle kerätään vain ryhmän nimi tai nimimerkki ja katsojamäärä. Yhteystieto on vapaaehtoinen.
-- Yhteystiedot poistetaan, kun raportti on lähetetty. Niitä ei lisätä raporttiin.
-- Lomakkeet (ryhmän nimi ja katsojamäärä) poistetaan viikon kuluttua raportin lähettämisestä. Raportoidut luvut jäävät tilaisuuden tietosivulle (`/admin/events/<tunnus>`).
+- Lomakkeet yhteystietoineen säilyvät viikon raportin lähettämisestä, jotta tilastosta vastaava voi ottaa yhteyttä ennen kirjaamista, ja poistetaan sitten. Yhteystietoja ei lisätä raporttisähköpostiin; ne näkyvät ylläpidon tietosivulla.
+- Raportin voi lähettää uudelleen tietosivulta. Lomakkeiden poiston jälkeen uudelleenlähetys käyttää ensimmäisen raportin lukuja. Raportoidut luvut jäävät tilaisuuden tietosivulle (`/admin/events/<tunnus>`).
 - IP-osoitteita tai muita henkilötietoja ei tallenneta.
 - Linkit sulkeutuvat tilaisuuden päätyttyä plus 30 minuuttia.
 
@@ -57,7 +57,7 @@ npm start
 | `YOUTUBE_OAUTH_REFRESH_TOKEN` | Pitkäikäinen tunnus, jonka saat komennolla `npm run oauth-setup` |
 | `SECRETS_KEY` | Pitkä satunnainen merkkijono, jolla ylläpidossa tallennetut tunnukset salataan (AES-256-GCM). Ilman sitä tunnuksia ei voi tallentaa ylläpidossa. Älä tallenna sitä data-hakemistoon; jos se katoaa, tunnukset on syötettävä uudelleen |
 | `SECRETS_FILE` | Salattujen tunnusten tiedosto (oletus `data/secrets.enc.json`) |
-| `POLL_INTERVAL_SECONDS` | Seurantakierroksen väli (oletus 60) |
+| `POLL_INTERVAL_SECONDS` | Väli, jolla YouTubelta kysytään (oletus ja vähimmäisarvo 3600). Raportit ja lomakkeiden poisto tarkistetaan minuutin välein ilman YouTube-kutsuja |
 | `ADMIN_PASSWORD` | Ylläpitonäkymän salasana (Basic-autentikointi, käyttäjänimi mikä tahansa). Ilman sitä ylläpito on pois käytöstä |
 | `BREVO_API_KEY` | Brevo-API-avain raporttien lähettämiseen |
 | `PARISH_NAME` | Seurakunnan nimi (oletusasetus, muutettavissa ylläpidossa) |

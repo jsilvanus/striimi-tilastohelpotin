@@ -25,7 +25,8 @@ const tracker = createTracker({
   mailer: () => credentials.mailer(),
 });
 
-tracker.start(config.pollIntervalSeconds * 1000);
+// The local tick (due reports, form deletion) runs every minute; YouTube is asked on the hourly schedule inside it.
+tracker.start(60_000);
 
 const server = createServer(createApp({ config, store, tracker, youtube, credentials, secrets }));
 server.listen(config.port, () => {

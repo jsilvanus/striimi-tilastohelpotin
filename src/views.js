@@ -102,7 +102,7 @@ ${errorList}
   <input name="watchers" type="number" required min="1" max="10000" inputmode="numeric" value="${esc(values.watchers)}"></label>
 <label>Yhteystieto sähköpostina (valinnainen)
   <input name="contactEmail" type="email" maxlength="200" value="${esc(values.contactEmail)}"></label>
-<p class="privacy">Tallennamme ryhmän nimen ja katsojamäärän vain tilaston laskemiseksi. Yhteystieto on vapaaehtoinen: sitä käytetään vain tilastoon liittyvään yhteydenottoon, ja se poistetaan heti raportin lähettämisen jälkeen. Muut lomaketiedot poistetaan viikon kuluttua raportin lähettämisestä. Emme tallenna IP-osoitteita tai muita henkilötietoja.</p>
+<p class="privacy">Tallennamme ryhmän nimen ja katsojamäärän vain tilaston laskemiseksi. Yhteystieto on vapaaehtoinen: sitä käytetään vain tilastoon liittyvään yhteydenottoon, jotta tilastosta vastaava voi tarvittaessa ottaa yhteyttä ennen tallenteen kirjaamista. Lomaketiedot yhteystietoineen poistetaan viikon kuluttua raportin lähettämisestä. Emme tallenna IP-osoitteita tai muita henkilötietoja.</p>
 <div><button type="submit">Lähetä</button></div>
 </form>`
     : '<p class="notice">Tämän tilaisuuden tilastointi on päättynyt. Kiitos osallistumisesta!</p>';
@@ -150,7 +150,7 @@ ${sent}
 <div class="actions">
 <button name="action" value="save">Tallenna</button>
 <button name="action" value="close" class="secondary">Sulje nyt</button>
-<button name="action" value="report" class="secondary"${event.reportSentAt ? ' disabled' : ''}>Lähetä raportti nyt</button>
+${event.reportSentAt ? '<button name="action" value="resend" class="secondary">Lähetä raportti uudelleen</button>' : '<button name="action" value="report" class="secondary">Lähetä raportti nyt</button>'}
 </div>
 </form>
 </article>`;
@@ -316,10 +316,10 @@ export function eventDetailsPage({ event, settings, report, flash = '', now }) {
 ${flash ? `<p class="notice ok" role="status">${esc(flash)}</p>` : ''}
 <form method="post" action="/admin/events/${id}" class="actions">
 <input type="hidden" name="next" value="/admin/events/${id}">
-<button name="action" value="report"${sent ? ' disabled' : ''}>Lähetä raportti nyt</button>
+${sent ? '<button name="action" value="resend">Lähetä raportti uudelleen</button>' : '<button name="action" value="report">Lähetä raportti nyt</button>'}
 <button name="action" value="close" class="secondary">Sulje lomake nyt</button>
 </form>
-${sent ? '' : '<p class="meta">Raportti lähtee muuten automaattisesti, kun tallennusaika on päättynyt.</p>'}
+${sent ? `<p class="meta">Raportti lähetettiin ${esc(formatDateTime(event.reportSentAt))}${event.reportResentAt ? `, uudelleen ${esc(formatDateTime(event.reportResentAt))}` : ''}.</p>` : '<p class="meta">Raportti lähtee muuten automaattisesti, kun tallennusaika on päättynyt.</p>'}
 <section>
 <h2>Osallistujat${sent ? ' (raportoitu)' : ' (arvio nyt)'}</h2>
 <table><tbody>
@@ -360,6 +360,7 @@ ${row('Lomake sulkeutuu', event.closedAt ? formatDateTime(event.closedAt) : null
 ${row('Tallennusaika', `${vodDaysOf(event)} vrk`)}
 ${row('Raportti erääntyy', due ? formatDateTime(due) : null)}
 ${row('Raportti lähetetty', event.reportSentAt ? formatDateTime(event.reportSentAt) : null)}
+${row('Raportti lähetetty uudelleen', event.reportResentAt ? formatDateTime(event.reportResentAt) : null)}
 ${row('Live-laskentatapa', COUNTING_SCHEMES[liveModelOf(event, settings)])}
 </tbody></table>
 </section>

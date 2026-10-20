@@ -123,7 +123,7 @@ test('when a stream ends its end time is recorded and the report is sent once, a
   assert.ok(app.store.getEvent('live0000001').reportSentAt);
 });
 
-test('submitted contact emails are removed once the report has been sent', async () => {
+test('contact emails are kept out of the report email but stay on the form until it is deleted', async () => {
   const videos = new Map([['live0000001', makeVideo()]]);
   const app = await setup({ videos });
   await app.tracker.tick();
@@ -135,7 +135,7 @@ test('submitted contact emails are removed once the report has been sent', async
   event.submissions.push({ id: 's1', groupName: 'Ryhmä', watchers: 5, contactEmail: 'joku@example.com', createdAt: '2026-10-18T11:10:00Z' });
   await app.tracker.sendReport(event, new Date('2026-10-19T12:00:00Z'));
 
-  assert.equal(event.submissions[0].contactEmail, null);
+  assert.equal(event.submissions[0].contactEmail, 'joku@example.com');
   assert.equal(app.sent.length, 1);
   assert.doesNotMatch(app.sent[0].text, /joku@example\.com/);
   assert.match(app.sent[0].text, /- Ryhmä: 5/);
@@ -249,4 +249,79 @@ test('forms are deleted a week after the report was sent, the reported figures s
   assert.equal(event.submissions.length, 0);
   assert.ok(event.formsPurgedAt);
   assert.equal(event.reportSnapshot.watchers, 5);
+});
+
+test('a sent report can be sent again, also after the forms were deleted, with the reported figures', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const app = await setup({ videos });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+  const event = app.store.getEvent('live0000001');
+  event.submissions.push({ id: 's1', groupName: 'Ryhmä', watchers: 5, contactEmail: 'a@example.com', createdAt: '2026-10-18T11:10:00Z' });
+
+  await assert.rejects(app.tracker.sendReport(event, new Date(), { resend: true }), /ei ole vielä lähetetty/);
+  await app.tracker.sendReport(event, new Date('2026-10-21T21:00:00Z'));
+  await assert.rejects(app.tracker.sendReport(event), /jo lähetetty/);
+
+  await app.tracker.sendReport(event, new Date('2026-10-22T08:00:00Z'), { resend: true });
+  assert.equal(app.sent.length, 2);
+  assert.equal(event.reportSentAt, '2026-10-21T21:00:00.000Z');
+  assert.equal(event.reportResentAt, '2026-10-22T08:00:00.000Z');
+  assert.match(app.sent[1].text, /- Ryhmä: 5/);
+
+  app.setTime('2026-10-28T21:00:01Z');
+  await app.tracker.tick();
+  assert.equal(event.submissions.length, 0);
+  await app.tracker.sendReport(event, new Date('2026-10-29T08:00:00Z'), { resend: true });
+  assert.match(app.sent[2].text, /Lomakkeet on poistettu/);
+  assert.match(app.sent[2].text, /Lomakeryhmiä: 1, ryhmien katsojia yhteensä: 5/);
+});
+
+test('YouTube is asked at most once per interval, and once more just before the report', async () => {
+  const videos = new Map([['live0000001', makeVideo({ viewCount: 100 })]]);
+  const calls = { uploads: 0, videos: 0 };
+  const youtube = {
+    async getChannelUploads() {
+      calls.uploads += 1;
+      return [...videos.values()];
+    },
+    async getVideos(ids) {
+      calls.videos += 1;
+      return ids.map((id) => videos.get(id)).filter(Boolean);
+    },
+  };
+  let clock = new Date('2026-10-18T11:05:00Z');
+  const sent = [];
+  const store = await createStore({ defaults: { ...DEFAULT_SETTINGS, reportRecipient: 'a@example.com', senderEmail: 'b@example.com' } });
+  const tracker = createTracker({
+    config: { youtubeChannelIds: [CHANNEL], publicBaseUrl: 'https://x.fi', pollIntervalSeconds: 3600 },
+    store,
+    youtube,
+    mailer: { async send(m) { sent.push(m); } },
+    now: () => clock,
+    log: { error() {} },
+  });
+  await tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null, viewCount: 100 }));
+  const afterFirst = { ...calls };
+  for (const minute of ['11:06', '11:30', '12:04']) {
+    clock = new Date(`2026-10-18T${minute}:00Z`);
+    await tracker.tick();
+  }
+  assert.deepEqual(calls, afterFirst);
+
+  clock = new Date('2026-10-18T12:06:00Z');
+  await tracker.tick();
+  assert.equal(calls.uploads, afterFirst.uploads + 1);
+
+  // The report due time brings one extra view-count read for this video.
+  const before = calls.videos;
+  videos.set('live0000001', { ...videos.get('live0000001'), viewCount: 180 });
+  clock = new Date('2026-10-24T21:00:01Z');
+  await tracker.tick();
+  assert.equal(sent.length, 1);
+  assert.ok(calls.videos > before);
+  assert.equal(store.getEvent('live0000001').youtube.viewCount, 180);
 });
