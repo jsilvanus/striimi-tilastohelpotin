@@ -63,7 +63,7 @@ npm start
 | `PARISH_NAME` | Seurakunnan nimi (oletusasetus, muutettavissa ylläpidossa) |
 | `PARISH_LOGO_URL` | Seurakunnan logon https-osoite (oletusasetus) |
 
-Asennus Dockerilla ja Traefik-overlay: [docs/DEPLOY.md](docs/DEPLOY.md).
+Asennus Dockerilla ja Traefik-overlay: [docs/DEPLOY.md](docs/DEPLOY.md). Usean seurakunnan (multi-tenant) suunnitelma, ei toteutettu: [docs/plans/multi-tenancy.md](docs/plans/multi-tenancy.md).
 
 ### Tunnukset ylläpidossa
 
