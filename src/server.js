@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { buildConsentUrl, exchangeCode, fetchIdentity } from './oauth.js';
-import { COUNTING_SCHEMES, EVENT_TYPES, MAX_VOD_DAYS, createEvent, fromLocalInput, isFormOpen } from './domain.js';
+import { COUNTING_SCHEMES, EVENT_TYPES, buildReport, MAX_VOD_DAYS, createEvent, fromLocalInput, isFormOpen } from './domain.js';
 import * as views from './views.js';
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -37,9 +37,13 @@ function redirect(res, location) {
   res.end();
 }
 
-function back(res, message) {
-  redirect(res, `/admin?msg=${encodeURIComponent(message)}`);
+function backTo(res, message, next = '/admin') {
+  // Only paths inside the admin view are accepted as a return target.
+  const target = /^\/admin(\/[A-Za-z0-9_\-%]*)*$/.test(next) ? next : '/admin';
+  redirect(res, `${target}?msg=${encodeURIComponent(message)}`);
 }
+
+const back = (res, message) => backTo(res, message);
 
 async function readForm(req) {
   const chunks = [];
@@ -219,6 +223,22 @@ export function createApp({ config, store, tracker, youtube: youtubeClient = nul
     );
   }
 
+  async function showEventDetails(res, id, url) {
+    const event = store.getEvent(id);
+    if (!event) throw new HttpError(404, 'Tilaisuutta ei löydy.');
+    send(
+      res,
+      200,
+      views.eventDetailsPage({
+        event,
+        settings: store.getSettings(),
+        report: buildReport(event, store.getSettings(), config.publicBaseUrl),
+        flash: url.searchParams.get('msg') ?? '',
+        now: new Date(),
+      }),
+    );
+  }
+
   async function saveSettings(res, form) {
     const settings = {
       parishName: text(form, 'parishName'),
@@ -270,6 +290,8 @@ export function createApp({ config, store, tracker, youtube: youtubeClient = nul
     const event = store.getEvent(id);
     if (!event) throw new HttpError(404, 'Tilaisuutta ei löydy.');
     const action = form.get('action');
+    const next = text(form, 'next') || '/admin';
+    const back = (res, message) => backTo(res, message, next);
 
     if (action === 'close') {
       const nowIso = new Date().toISOString();
@@ -424,6 +446,8 @@ export function createApp({ config, store, tracker, youtube: youtubeClient = nul
       return;
     }
     if (req.method === 'GET' && url.pathname === '/admin') return showAdmin(res, url);
+    const detailsMatch = url.pathname.match(/^\/admin\/events\/([^/]+)$/);
+    if (req.method === 'GET' && detailsMatch) return showEventDetails(res, decodeURIComponent(detailsMatch[1]), url);
     if (url.pathname === '/admin/credentials' || url.pathname.startsWith('/admin/credentials/') || url.pathname.startsWith('/admin/oauth/')) {
       let form = null;
       if (req.method === 'POST') {

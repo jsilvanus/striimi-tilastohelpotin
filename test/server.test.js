@@ -177,6 +177,24 @@ async function credentialsApp({ withSecrets = true, fetchImpl } = {}) {
   return { app, call, secrets };
 }
 
+test('the event details page lists the forms and the numbers, and can send the report', async () => {
+  store.getEvent('manual-open-1').submissions.push({ id: 'det1', groupName: 'Lomakeryhmä', watchers: 4, contactEmail: null, createdAt: new Date().toISOString() });
+  const res = await fetch(`${base}/admin/events/manual-open-1`, { headers: { authorization: auth } });
+  const html = await res.text();
+  assert.equal(res.status, 200);
+  assert.match(html, /Lomakeryhmä/);
+  assert.match(html, /Osallistujat yhteensä/);
+  assert.match(html, /Raportin esikatselu/);
+  assert.match(html, /Lähetä raportti nyt/);
+  assert.equal((await fetch(`${base}/admin/events/ei-ole`, { headers: { authorization: auth } })).status, 404);
+
+  const closed = await post('/admin/events/manual-open-1', { action: 'close', next: '/admin/events/manual-open-1' }, { authorization: auth });
+  assert.equal(closed.status, 303);
+  assert.match(closed.headers.get('location'), /^\/admin\/events\/manual-open-1\?msg=/);
+  const evil = await post('/admin/events/manual-open-1', { action: 'close', next: '//evil.example' }, { authorization: auth });
+  assert.match(evil.headers.get('location'), /^\/admin\?msg=/);
+});
+
 test('the credentials page needs the admin login', async () => {
   const { app } = await credentialsApp();
   const res = await fetch(`http://127.0.0.1:${app.address().port}/admin/credentials`);

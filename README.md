@@ -30,6 +30,7 @@ ja lähettää tilaisuuden päätyttyä raporttipyynnön sähköpostitse (Brevo)
 
 - Lomakkeelle kerätään vain ryhmän nimi tai nimimerkki ja katsojamäärä. Yhteystieto on vapaaehtoinen.
 - Yhteystiedot poistetaan, kun raportti on lähetetty. Niitä ei lisätä raporttiin.
+- Lomakkeet (ryhmän nimi ja katsojamäärä) poistetaan viikon kuluttua raportin lähettämisestä. Raportoidut luvut jäävät tilaisuuden tietosivulle (`/admin/events/<tunnus>`).
 - IP-osoitteita tai muita henkilötietoja ei tallenneta.
 - Linkit sulkeutuvat tilaisuuden päätyttyä plus 30 minuuttia.
 
@@ -61,6 +62,8 @@ npm start
 | `BREVO_API_KEY` | Brevo-API-avain raporttien lähettämiseen |
 | `PARISH_NAME` | Seurakunnan nimi (oletusasetus, muutettavissa ylläpidossa) |
 | `PARISH_LOGO_URL` | Seurakunnan logon https-osoite (oletusasetus) |
+
+Asennus Dockerilla ja Traefik-overlay: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Tunnukset ylläpidossa
 

@@ -226,3 +226,27 @@ test('recording views are counted from the view count at the end of the stream',
   assert.equal(app.sent.length, 1);
   assert.match(app.sent[0].text, /Tallenteen katselut \(7 vrk päättymisestä\): 90/);
 });
+
+test('forms are deleted a week after the report was sent, the reported figures stay', async () => {
+  const videos = new Map([['live0000001', makeVideo()]]);
+  const app = await setup({ videos });
+  await app.tracker.tick();
+  videos.set('live0000001', makeVideo({ liveBroadcastContent: 'none', actualEndTime: '2026-10-18T11:00:00Z', concurrentViewers: null }));
+  app.setTime('2026-10-18T11:05:00Z');
+  await app.tracker.tick();
+  const event = app.store.getEvent('live0000001');
+  event.submissions.push({ id: 's1', groupName: 'Ryhmä', watchers: 5, contactEmail: null, createdAt: '2026-10-18T11:10:00Z' });
+
+  await app.tracker.sendReport(event, new Date('2026-10-21T21:00:00Z'));
+  assert.equal(event.reportSnapshot.groups, 1);
+
+  app.setTime('2026-10-28T20:59:00Z');
+  await app.tracker.tick();
+  assert.equal(event.submissions.length, 1);
+
+  app.setTime('2026-10-28T21:00:01Z');
+  await app.tracker.tick();
+  assert.equal(event.submissions.length, 0);
+  assert.ok(event.formsPurgedAt);
+  assert.equal(event.reportSnapshot.watchers, 5);
+});

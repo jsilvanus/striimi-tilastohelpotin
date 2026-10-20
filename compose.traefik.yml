@@ -1,0 +1,22 @@
+# Overlay that publishes the app through an existing Traefik. Use it with the base file:
+#   docker compose -f compose.yml -f compose.traefik.yml up -d
+# Needs Docker Compose 2.24 or newer (for !reset). Set APP_HOST in .env, for example tilastot.example.fi.
+# The Traefik network, entrypoint and certificate resolver below are the usual names; change them to match your Traefik.
+services:
+  app:
+    ports: !reset []
+    networks:
+      - default
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.striimi.rule: Host(`${APP_HOST}`)
+      traefik.http.routers.striimi.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.striimi.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.services.striimi.loadbalancer.server.port: "8095"
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK:-traefik}
+    external: true

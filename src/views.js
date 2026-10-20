@@ -1,11 +1,16 @@
 import {
   COUNTING_SCHEMES,
   EVENT_TYPES,
+  FORM_RETENTION_DAYS,
   MAX_VOD_DAYS,
   TEMPLATE_KEYS,
   estimateParticipants,
   eventStatus,
   formatDateTime,
+  formsPurgeAt,
+  liveModelOf,
+  reportAt,
+  vodDaysOf,
   toLocalInput,
 } from './domain.js';
 
@@ -47,6 +52,10 @@ a { color: var(--accent); }
 .badge { font-size: 13px; border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; margin-left: 6px; }
 section { margin-top: 28px; }
 .inline { display: inline; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); font-weight: normal; }
+th[scope=row] { color: var(--muted); }
+pre.card { white-space: pre-wrap; }
 `;
 
 function layout({ title, settings = {}, body }) {
@@ -93,7 +102,7 @@ ${errorList}
   <input name="watchers" type="number" required min="1" max="10000" inputmode="numeric" value="${esc(values.watchers)}"></label>
 <label>Yhteystieto sähköpostina (valinnainen)
   <input name="contactEmail" type="email" maxlength="200" value="${esc(values.contactEmail)}"></label>
-<p class="privacy">Tallennamme ryhmän nimen ja katsojamäärän vain tilaston laskemiseksi. Yhteystieto on vapaaehtoinen: sitä käytetään vain tilastoon liittyvään yhteydenottoon, ja se poistetaan raportin lähettämisen jälkeen. Emme tallenna IP-osoitteita tai muita henkilötietoja.</p>
+<p class="privacy">Tallennamme ryhmän nimen ja katsojamäärän vain tilaston laskemiseksi. Yhteystieto on vapaaehtoinen: sitä käytetään vain tilastoon liittyvään yhteydenottoon, ja se poistetaan heti raportin lähettämisen jälkeen. Muut lomaketiedot poistetaan viikon kuluttua raportin lähettämisestä. Emme tallenna IP-osoitteita tai muita henkilötietoja.</p>
 <div><button type="submit">Lähetä</button></div>
 </form>`
     : '<p class="notice">Tämän tilaisuuden tilastointi on päättynyt. Kiitos osallistumisesta!</p>';
@@ -127,7 +136,7 @@ function eventCard(event, now, settings) {
   return `<article class="card">
 <h3>${esc(event.title)}<span class="badge">${esc(eventStatus(event, now))}</span></h3>
 <p class="meta">${event.source === 'youtube' ? 'YouTube' : 'Manuaalinen linkki'} · ${esc(EVENT_TYPES[event.eventType].label)} · lomakkeita ${event.submissions.length} · osallistujat: ${esc(estimate ?? 'ei arvioitavissa')}</p>
-<p><a href="/e/${id}">Julkinen linkki</a></p>
+<p><a href="/e/${id}">Julkinen linkki</a> · <a href="/admin/events/${id}">Tiedot</a></p>
 ${sent}
 <form method="post" action="/admin/events/${id}" class="stack">
 <div class="grid">
@@ -275,4 +284,96 @@ ${who}${signIn}${tokenNote}</div>
 ${credentialCard({ title: 'Brevo-API-avain', help: 'Raporttien lähetys.', item: status.brevoApiKey, action: 'brevo', fields: [{ name: 'apiKey', label: 'API-avain', secret: true }], canStore })}
 </section>`;
   return layout({ title: 'Tunnukset', settings, body });
+}
+
+const orDash = (value) => (value === null || value === undefined ? 'ei saatavilla' : value);
+
+function row(label, value) {
+  return `<tr><th scope="row">${esc(label)}</th><td>${esc(orDash(value))}</td></tr>`;
+}
+
+export function eventDetailsPage({ event, settings, report, flash = '', now }) {
+  const id = encodeURIComponent(event.id);
+  const sent = Boolean(event.reportSentAt);
+  // After the report the figures are frozen in the snapshot; before it they are computed from the live data.
+  const est = event.reportSnapshot ?? estimateParticipants(event, settings);
+  const purgeAt = formsPurgeAt(event);
+  const due = reportAt(event);
+  const samples = event.samples;
+  const sampleValues = samples.map((sample) => sample.viewers);
+  const forms = event.submissions.length
+    ? `<table><thead><tr><th>Ilmoitettu</th><th>Ryhmä</th><th>Katsojia</th><th>Yhteystieto</th></tr></thead><tbody>${event.submissions
+        .map(
+          (submission) =>
+            `<tr><td>${esc(formatDateTime(submission.createdAt))}</td><td>${esc(submission.groupName)}</td><td>${esc(submission.watchers)}</td><td>${esc(submission.contactEmail ?? '')}</td></tr>`,
+        )
+        .join('')}</tbody></table>`
+    : event.formsPurgedAt
+      ? `<p class="meta">Lomakkeet poistettiin ${esc(formatDateTime(event.formsPurgedAt))}. Raportoidut luvut ovat tallessa.</p>`
+      : '<p class="meta">Ei lomakkeita.</p>';
+  const body = `<h1>${esc(event.title)}<span class="badge">${esc(eventStatus(event, now))}</span></h1>
+<p><a href="/admin">← Ylläpitoon</a> · <a href="/e/${id}">Julkinen sivu</a>${event.url ? ` · <a href="${esc(event.url)}" rel="noopener">Tilaisuus</a>` : ''}</p>
+${flash ? `<p class="notice ok" role="status">${esc(flash)}</p>` : ''}
+<form method="post" action="/admin/events/${id}" class="actions">
+<input type="hidden" name="next" value="/admin/events/${id}">
+<button name="action" value="report"${sent ? ' disabled' : ''}>Lähetä raportti nyt</button>
+<button name="action" value="close" class="secondary">Sulje lomake nyt</button>
+</form>
+${sent ? '' : '<p class="meta">Raportti lähtee muuten automaattisesti, kun tallennusaika on päättynyt.</p>'}
+<section>
+<h2>Osallistujat${sent ? ' (raportoitu)' : ' (arvio nyt)'}</h2>
+<table><tbody>
+${row(`Live-katsojat (${COUNTING_SCHEMES[est.model]})`, est.live)}
+${row('Lomakkeita (ryhmiä)', est.groups)}
+${row('Ryhmien katsojat yhteensä', est.watchers)}
+${row('Live ryhmien jälkeen (−1 per ryhmä)', est.liveAfterGroups)}
+${row(`Tallenteen katselut (${vodDaysOf(event)} vrk)`, est.vod)}
+${row('Osallistujat yhteensä', est.total)}
+</tbody></table>
+</section>
+<section>
+<h2>Lomakkeet (${event.submissions.length})</h2>
+${forms}
+${purgeAt && !event.formsPurgedAt ? `<p class="meta">Lomakkeet poistetaan ${esc(formatDateTime(purgeAt))} (${FORM_RETENTION_DAYS} vrk raportista).</p>` : ''}
+</section>
+<section>
+<h2>YouTube-luvut</h2>
+<table><tbody>
+${row('Samanaikaisten katsojien enimmäismäärä (Analytics)', event.analytics?.peakConcurrentViewers)}
+${row('Samanaikaisten katsojien keskiarvo (Analytics)', event.analytics?.averageConcurrentViewers)}
+${row('Enimmäismäärä näytteistä', sampleValues.length ? Math.max(...sampleValues) : null)}
+${row('Keskiarvo näytteistä', sampleValues.length ? Math.round(sampleValues.reduce((a, b) => a + b, 0) / sampleValues.length) : null)}
+${row('Näytteitä', samples.length)}
+${row('Katselukerrat nyt (viimeisin haku)', event.youtube?.viewCount)}
+${row('Katselukerrat lähetyksen päättyessä', event.viewCountAtEnd)}
+${row('Analytics haettu', event.analytics?.fetchedAt ? formatDateTime(event.analytics.fetchedAt) : null)}
+${row('YouTube-tila viimeksi tarkistettu', event.youtube?.checkedAt ? formatDateTime(event.youtube.checkedAt) : null)}
+</tbody></table>
+</section>
+<section>
+<h2>Ajat ja asetukset</h2>
+<table><tbody>
+${row('Tyyppi', EVENT_TYPES[event.eventType].label)}
+${row('Alkoi', event.startsAt ? formatDateTime(event.startsAt) : null)}
+${row('Päättyi', event.endsAt ? formatDateTime(event.endsAt) : null)}
+${row('Lomake sulkeutuu', event.closedAt ? formatDateTime(event.closedAt) : null)}
+${row('Tallennusaika', `${vodDaysOf(event)} vrk`)}
+${row('Raportti erääntyy', due ? formatDateTime(due) : null)}
+${row('Raportti lähetetty', event.reportSentAt ? formatDateTime(event.reportSentAt) : null)}
+${row('Live-laskentatapa', COUNTING_SCHEMES[liveModelOf(event, settings)])}
+</tbody></table>
+</section>
+${
+  sent
+    ? ''
+    : `<section><h2>Raportin esikatselu</h2><p class="meta">Aihe: ${esc(report.subject)}</p><pre class="card">${esc(report.text)}</pre></section>`
+}
+${
+  samples.length
+    ? `<section><details><summary>Katsojanäytteet (${samples.length})</summary><table><thead><tr><th>Aika</th><th>Katsojia</th></tr></thead><tbody>${samples
+        .map((sample) => `<tr><td>${esc(formatDateTime(sample.at))}</td><td>${esc(sample.viewers)}</td></tr>`)
+        .join('')}</tbody></table></details></section>`
+    : ''
+}`;
+  return layout({ title: event.title, settings, body });
 }

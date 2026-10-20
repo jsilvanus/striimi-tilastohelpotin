@@ -7,6 +7,9 @@ export const EVENT_TYPES = {
 
 export const MAX_VOD_DAYS = 21;
 
+// Submitted forms are deleted this many days after the report email went out.
+export const FORM_RETENTION_DAYS = 7;
+
 // Live models; the global default is set in settings and can be overridden per event.
 export const COUNTING_SCHEMES = {
   max_concurrent: 'Samanaikaisten katsojien enimmäismäärä',
@@ -66,6 +69,8 @@ export function createEvent(fields) {
     youtube: null,
     submissions: [],
     reportSentAt: null,
+    reportSnapshot: null,
+    formsPurgedAt: null,
     ...fields,
   };
 }
@@ -241,4 +246,10 @@ export function toLocalInput(iso) {
   if (!iso) return '';
   const parts = wallClockParts(new Date(iso));
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+// When the submitted forms of a reported event are deleted; null while no report has gone out.
+export function formsPurgeAt(event) {
+  if (!event.reportSentAt) return null;
+  return new Date(Date.parse(event.reportSentAt) + FORM_RETENTION_DAYS * 24 * 60 * MINUTE_MS);
 }

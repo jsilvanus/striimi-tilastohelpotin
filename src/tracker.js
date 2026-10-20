@@ -1,4 +1,4 @@
-import { buildReport, createEvent, reportAt } from './domain.js';
+import { buildReport, createEvent, estimateParticipants, formsPurgeAt, reportAt } from './domain.js';
 
 const MISSING_VIDEO_TTL_MS = 10 * 60_000;
 
@@ -103,6 +103,8 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
       text,
     });
     event.reportSentAt = ts.toISOString();
+    // The forms are deleted after a week, so keep the figures that were reported.
+    event.reportSnapshot = estimateParticipants(event, settings);
     // Contact details are only needed to reach the group; drop them once the report has gone out.
     for (const submission of event.submissions) submission.contactEmail = null;
     await store.save();
@@ -121,6 +123,19 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
     }
   }
 
+  // Deletes the submitted forms a week after the report was sent. The reported figures stay in the snapshot.
+  async function purgeForms(ts) {
+    let changed = false;
+    for (const event of store.listEvents()) {
+      const due = formsPurgeAt(event);
+      if (!due || ts < due || event.formsPurgedAt) continue;
+      event.submissions = [];
+      event.formsPurgedAt = ts.toISOString();
+      changed = true;
+    }
+    if (changed) await store.save();
+  }
+
   async function tick() {
     if (running) return;
     running = true;
@@ -136,6 +151,7 @@ export function createTracker({ config, store, youtube: youtubeClient = null, an
         }
       }
       await sendDueReports(ts);
+      await purgeForms(ts);
     } finally {
       running = false;
     }
