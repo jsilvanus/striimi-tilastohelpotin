@@ -1,6 +1,7 @@
-name: Publish image
+name: Test and publish image
 
 on:
+  pull_request:
   push:
     branches: [main]
     tags: ['v*']
@@ -23,6 +24,7 @@ jobs:
 
   publish:
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
